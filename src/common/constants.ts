@@ -29,6 +29,7 @@ export const BASE_INDEXES = {
   PRODUCTS_ALIAS: 'products-read',
   CONSUMER_STATE: 'search-consumer-state',
   REINDEX_JOBS: 'search-reindex-jobs',
+  SEARCH_CATEGORIES: 'search-categories',
 } as const;
 
 export function formatUtcTimestamp(date: Date = new Date()): string {
@@ -64,4 +65,8 @@ export function getConsumerStateIndex(prefix = ''): string {
 
 export function getReindexJobsIndex(prefix = ''): string {
   return getPrefixedIndexName(BASE_INDEXES.REINDEX_JOBS, prefix);
+}
+
+export function getSearchCategoriesIndex(prefix = ''): string {
+  return getPrefixedIndexName(BASE_INDEXES.SEARCH_CATEGORIES, prefix);
 }

@@ -1,3 +1,4 @@
+import { VisibilityStatus } from '../common/enums';
 import { DomainEvent } from '../event-consumer/interfaces';
 
 export interface ProductSearchDocument {
@@ -16,8 +17,9 @@ export interface ProductSearchDocument {
   rating_count: number;
   sales_count: number;
   attributes: Record<string, unknown>;
+  spec_attributes?: Record<string, unknown>;
   suggest?: string[] | { input: string[]; weight?: number };
-  visibility_status: string;
+  visibility_status: VisibilityStatus;
   source_version: number;
   source_event_id: string;
   indexed_at: string;
@@ -29,12 +31,44 @@ export interface ProductSearchDocument {
   };
 }
 
+export type DocumentChange =
+  | { kind: 'UPSERT'; id: string; doc: ProductSearchDocument }
+  | {
+      kind: 'PATCH';
+      id: string;
+      doc: Partial<ProductSearchDocument>;
+      sourceVersion: number;
+      sourceEventId: string;
+    }
+  | {
+      kind: 'SKIP';
+      reason: 'OLD_VERSION' | 'DUPLICATE' | 'NOT_APPLICABLE';
+    };
+
 export interface IProductDocumentBuilder {
-  fromProductEvent(
+  build(
     evt: DomainEvent<unknown>,
-    current?: ProductSearchDocument,
-  ): ProductSearchDocument;
+    current: ProductSearchDocument | null,
+  ): DocumentChange;
 }
+
+export interface CategoryProjection {
+  category_id: string;
+  name: string;
+  parent_id?: string | null;
+  path_ids: string[];
+  status: string;
+  source_version: number;
+  updated_at: string;
+}
+
+export interface ICategoryProjection {
+  getMany(ids: string[]): Promise<Map<string, CategoryProjection>>;
+  resolvePathIds(categoryId: string): Promise<string[]>;
+}
+
+export const CATEGORY_PROJECTION = 'ICategoryProjection';
+export const CATEGORY_PROJECTION_TOKEN = CATEGORY_PROJECTION;
 
 export interface IIndexWriter {
   bulkUpsert(index: string, docs: ProductSearchDocument[]): Promise<void>;

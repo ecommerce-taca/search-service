@@ -39,9 +39,6 @@ export const PRODUCTS_INDEX_MAPPING_V1: MappingTypeMapping = {
     title: {
       type: 'text',
       analyzer: 'vi_baseline',
-      fields: {
-        exact: { type: 'keyword' },
-      },
     },
     title_exact: { type: 'keyword' },
     description: { type: 'text' },
@@ -50,6 +47,7 @@ export const PRODUCTS_INDEX_MAPPING_V1: MappingTypeMapping = {
     rating_count: { type: 'integer' },
     sales_count: { type: 'long' },
     attributes: { type: 'flattened' },
+    spec_attributes: { type: 'flattened' },
     suggest: {
       type: 'completion',
       analyzer: 'vi_baseline',
