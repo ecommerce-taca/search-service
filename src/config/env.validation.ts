@@ -1,5 +1,6 @@
-import { plainToInstance, Type } from 'class-transformer';
+import { plainToInstance, Transform, Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -53,6 +54,17 @@ export class EnvironmentVariables {
   @IsString()
   @IsOptional()
   KAFKA_TOPIC_PREFIX: string = '';
+
+  @Transform(({ obj, key }) => {
+    const val = obj[key];
+    if (val === undefined || val === null || val === '') return true;
+    if (val === 'false' || val === false) return false;
+    if (val === 'true' || val === true) return true;
+    return val;
+  })
+  @IsBoolean()
+  @IsOptional()
+  KAFKA_CONSUMER_ENABLED: boolean = true;
 }
 
 export function validate(

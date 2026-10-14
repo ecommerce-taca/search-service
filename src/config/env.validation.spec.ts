@@ -36,6 +36,46 @@ describe('Config Validation', () => {
     expect(validated.APP_VERSION).toBe('1.0.0');
     expect(validated.ES_INDEX_PREFIX).toBe('');
     expect(validated.KAFKA_TOPIC_PREFIX).toBe('');
+    expect(validated.KAFKA_CONSUMER_ENABLED).toBe(true);
+  });
+
+  it('should parse KAFKA_CONSUMER_ENABLED boolean and string values correctly', () => {
+    const baseConfig = {
+      ES_NODE: 'http://localhost:9200',
+      KAFKA_BROKERS: 'localhost:9092',
+    };
+
+    expect(
+      validate({ ...baseConfig, KAFKA_CONSUMER_ENABLED: 'false' })
+        .KAFKA_CONSUMER_ENABLED,
+    ).toBe(false);
+
+    expect(
+      validate({ ...baseConfig, KAFKA_CONSUMER_ENABLED: false })
+        .KAFKA_CONSUMER_ENABLED,
+    ).toBe(false);
+
+    expect(
+      validate({ ...baseConfig, KAFKA_CONSUMER_ENABLED: 'true' })
+        .KAFKA_CONSUMER_ENABLED,
+    ).toBe(true);
+
+    expect(
+      validate({ ...baseConfig, KAFKA_CONSUMER_ENABLED: true })
+        .KAFKA_CONSUMER_ENABLED,
+    ).toBe(true);
+  });
+
+  it('should throw fail-fast error when KAFKA_CONSUMER_ENABLED is invalid', () => {
+    const config = {
+      ES_NODE: 'http://localhost:9200',
+      KAFKA_BROKERS: 'localhost:9092',
+      KAFKA_CONSUMER_ENABLED: 'not-a-boolean',
+    };
+
+    expect(() => validate(config)).toThrow(
+      /Config validation error \(fail-fast\)/,
+    );
   });
 
   it('should throw fail-fast error when ES_NODE is missing', () => {

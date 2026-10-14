@@ -62,4 +62,10 @@ export class AppConfigService {
   get kafkaTopicPrefix(): string {
     return this.configService.get('KAFKA_TOPIC_PREFIX', { infer: true }) ?? '';
   }
+
+  get kafkaConsumerEnabled(): boolean {
+    return (
+      this.configService.get('KAFKA_CONSUMER_ENABLED', { infer: true }) ?? true
+    );
+  }
 }
