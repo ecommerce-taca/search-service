@@ -1,5 +1,7 @@
-export const REINDEX_JOBS_MAPPING_V1 = {
-  dynamic: 'strict' as const,
+import { MappingTypeMapping } from '@elastic/elasticsearch/lib/api/types';
+
+export const REINDEX_JOBS_MAPPING_V1: MappingTypeMapping = {
+  dynamic: 'strict',
   properties: {
     job_id: { type: 'keyword' },
     target_index: { type: 'keyword' },

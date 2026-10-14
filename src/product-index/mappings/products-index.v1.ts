@@ -1,4 +1,9 @@
-export const PRODUCTS_INDEX_SETTINGS_V1 = {
+import {
+  IndicesIndexSettings,
+  MappingTypeMapping,
+} from '@elastic/elasticsearch/lib/api/types';
+
+export const PRODUCTS_INDEX_SETTINGS_V1: IndicesIndexSettings = {
   index: {
     refresh_interval: '1s',
   },
@@ -19,8 +24,8 @@ export const PRODUCTS_INDEX_SETTINGS_V1 = {
   },
 };
 
-export const PRODUCTS_INDEX_MAPPING_V1 = {
-  dynamic: 'strict' as const,
+export const PRODUCTS_INDEX_MAPPING_V1: MappingTypeMapping = {
+  dynamic: 'strict',
   properties: {
     product_id: { type: 'keyword' },
     shop_id: { type: 'keyword' },

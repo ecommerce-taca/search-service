@@ -1,5 +1,7 @@
-export const CONSUMER_STATE_MAPPING_V1 = {
-  dynamic: 'strict' as const,
+import { MappingTypeMapping } from '@elastic/elasticsearch/lib/api/types';
+
+export const CONSUMER_STATE_MAPPING_V1: MappingTypeMapping = {
+  dynamic: 'strict',
   properties: {
     event_id: { type: 'keyword' },
     aggregate_id: { type: 'keyword' },
