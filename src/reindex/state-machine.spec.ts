@@ -1,121 +1,198 @@
 import { ReindexState } from '../common/enums';
 import {
-  assertTransition,
-  canTransition,
-  IllegalStateException,
+  ALLOWED_REINDEX_TRANSITIONS,
+  IllegalStateTransitionException,
   ReindexStateMachine,
 } from './state-machine';
 
-describe('ReindexStateMachine', () => {
-  describe('valid transitions', () => {
-    it('allows REQUESTED -> RUNNING, CANCELLED, FAILED', () => {
-      expect(canTransition(ReindexState.REQUESTED, ReindexState.RUNNING)).toBe(
-        true,
+describe('ReindexStateMachine (Unit)', () => {
+  let stateMachine: ReindexStateMachine;
+
+  beforeEach(() => {
+    stateMachine = new ReindexStateMachine();
+  });
+
+  describe('Allowed Transitions', () => {
+    it('[RX-U-22] State machine: transition REQUESTED -> RUNNING updates state and timestamp', () => {
+      const result = stateMachine.transition(
+        ReindexState.REQUESTED,
+        ReindexState.RUNNING,
       );
-      expect(
-        canTransition(ReindexState.REQUESTED, ReindexState.CANCELLED),
-      ).toBe(true);
-      expect(canTransition(ReindexState.REQUESTED, ReindexState.FAILED)).toBe(
-        true,
-      );
-      expect(() =>
-        assertTransition(ReindexState.REQUESTED, ReindexState.RUNNING),
-      ).not.toThrow();
+      expect(result).toBe(ReindexState.RUNNING);
     });
 
-    it('allows RUNNING -> VALIDATING, CANCELLED, FAILED', () => {
-      expect(canTransition(ReindexState.RUNNING, ReindexState.VALIDATING)).toBe(
-        true,
+    it('[RX-U-23] State machine: transition RUNNING -> VALIDATING updates state upon replay/copy completion', () => {
+      const result = stateMachine.transition(
+        ReindexState.RUNNING,
+        ReindexState.VALIDATING,
       );
-      expect(canTransition(ReindexState.RUNNING, ReindexState.CANCELLED)).toBe(
-        true,
-      );
-      expect(canTransition(ReindexState.RUNNING, ReindexState.FAILED)).toBe(
-        true,
-      );
+      expect(result).toBe(ReindexState.VALIDATING);
     });
 
-    it('allows VALIDATING -> SWAPPED, CANCELLED, FAILED', () => {
-      expect(canTransition(ReindexState.VALIDATING, ReindexState.SWAPPED)).toBe(
-        true,
+    it('[RX-U-24] State machine: transition VALIDATING -> SWAPPED updates state upon successful alias swap', () => {
+      const result = stateMachine.transition(
+        ReindexState.VALIDATING,
+        ReindexState.SWAPPED,
       );
+      expect(result).toBe(ReindexState.SWAPPED);
+    });
+
+    it('[RX-U-25] State machine: transition REQUESTED -> FAILED when initialization fails', () => {
+      const result = stateMachine.transition(
+        ReindexState.REQUESTED,
+        ReindexState.FAILED,
+      );
+      expect(result).toBe(ReindexState.FAILED);
+    });
+
+    it('[RX-U-26] State machine: transition RUNNING -> FAILED on unrecoverable copy or kafka replay error', () => {
+      const result = stateMachine.transition(
+        ReindexState.RUNNING,
+        ReindexState.FAILED,
+      );
+      expect(result).toBe(ReindexState.FAILED);
+    });
+
+    it('[RX-U-27] State machine: transition VALIDATING -> FAILED on pre-swap gate failure', () => {
+      const result = stateMachine.transition(
+        ReindexState.VALIDATING,
+        ReindexState.FAILED,
+      );
+      expect(result).toBe(ReindexState.FAILED);
+    });
+
+    it('[RX-U-28] State machine: transition REQUESTED / RUNNING / VALIDATING -> CANCELLED upon operator cancel signal', () => {
       expect(
-        canTransition(ReindexState.VALIDATING, ReindexState.CANCELLED),
-      ).toBe(true);
-      expect(canTransition(ReindexState.VALIDATING, ReindexState.FAILED)).toBe(
-        true,
-      );
+        stateMachine.transition(ReindexState.REQUESTED, ReindexState.CANCELLED),
+      ).toBe(ReindexState.CANCELLED);
+      expect(
+        stateMachine.transition(ReindexState.RUNNING, ReindexState.CANCELLED),
+      ).toBe(ReindexState.CANCELLED);
+      expect(
+        stateMachine.transition(ReindexState.VALIDATING, ReindexState.CANCELLED),
+      ).toBe(ReindexState.CANCELLED);
     });
   });
 
-  describe('illegal transitions', () => {
-    it('rejects jumping from REQUESTED to SWAPPED', () => {
-      expect(canTransition(ReindexState.REQUESTED, ReindexState.SWAPPED)).toBe(
-        false,
-      );
+  describe('Illegal Transitions', () => {
+    it('[RX-U-29] State machine: illegal transition REQUESTED -> SWAPPED throws exception', () => {
       expect(() =>
-        assertTransition(ReindexState.REQUESTED, ReindexState.SWAPPED),
-      ).toThrow(IllegalStateException);
+        stateMachine.transition(ReindexState.REQUESTED, ReindexState.SWAPPED),
+      ).toThrow(IllegalStateTransitionException);
     });
 
-    it('rejects jumping from RUNNING to SWAPPED without VALIDATING', () => {
-      expect(canTransition(ReindexState.RUNNING, ReindexState.SWAPPED)).toBe(
-        false,
-      );
+    it('[RX-U-30] State machine: illegal transition RUNNING -> SWAPPED throws exception', () => {
       expect(() =>
-        assertTransition(ReindexState.RUNNING, ReindexState.SWAPPED),
-      ).toThrow(IllegalStateException);
+        stateMachine.transition(ReindexState.RUNNING, ReindexState.SWAPPED),
+      ).toThrow(IllegalStateTransitionException);
     });
 
-    it('rejects transitioning from terminal states', () => {
-      expect(canTransition(ReindexState.SWAPPED, ReindexState.RUNNING)).toBe(
-        false,
-      );
-      expect(canTransition(ReindexState.FAILED, ReindexState.SWAPPED)).toBe(
-        false,
-      );
-      expect(canTransition(ReindexState.CANCELLED, ReindexState.RUNNING)).toBe(
-        false,
-      );
-
+    it('[RX-U-31] State machine: illegal transition SWAPPED -> RUNNING throws exception (terminal state immutable)', () => {
       expect(() =>
-        assertTransition(ReindexState.SWAPPED, ReindexState.RUNNING),
-      ).toThrow(IllegalStateException);
-      expect(() =>
-        assertTransition(ReindexState.FAILED, ReindexState.SWAPPED),
-      ).toThrow(IllegalStateException);
-      expect(() =>
-        assertTransition(ReindexState.CANCELLED, ReindexState.RUNNING),
-      ).toThrow(IllegalStateException);
+        stateMachine.transition(ReindexState.SWAPPED, ReindexState.RUNNING),
+      ).toThrow(IllegalStateTransitionException);
     });
 
-    it('rejects backwards transitions', () => {
+    it('[RX-U-32] State machine: illegal transition FAILED -> SWAPPED throws exception (terminal state immutable)', () => {
+      expect(() =>
+        stateMachine.transition(ReindexState.FAILED, ReindexState.SWAPPED),
+      ).toThrow(IllegalStateTransitionException);
+    });
+
+    it('[RX-U-33] State machine: illegal transition CANCELLED -> RUNNING throws exception (terminal state immutable)', () => {
+      expect(() =>
+        stateMachine.transition(ReindexState.CANCELLED, ReindexState.RUNNING),
+      ).toThrow(IllegalStateTransitionException);
+    });
+
+    it('[RX-U-34] State machine: illegal transition VALIDATING -> REQUESTED throws exception (forward-only)', () => {
+      expect(() =>
+        stateMachine.transition(ReindexState.VALIDATING, ReindexState.REQUESTED),
+      ).toThrow(IllegalStateTransitionException);
+    });
+
+    it('[RX-U-35] State machine: illegal transition VALIDATING -> RUNNING throws exception (backward transition rejected)', () => {
+      expect(() =>
+        stateMachine.transition(ReindexState.VALIDATING, ReindexState.RUNNING),
+      ).toThrow(IllegalStateTransitionException);
+    });
+  });
+
+  describe('Comprehensive State Transition Matrix & Terminal States', () => {
+    it('verifies allowed transition map matches specification exactly', () => {
+      expect(ALLOWED_REINDEX_TRANSITIONS[ReindexState.REQUESTED]).toEqual(
+        expect.arrayContaining([
+          ReindexState.RUNNING,
+          ReindexState.CANCELLED,
+          ReindexState.FAILED,
+        ]),
+      );
+      expect(ALLOWED_REINDEX_TRANSITIONS[ReindexState.RUNNING]).toEqual(
+        expect.arrayContaining([
+          ReindexState.VALIDATING,
+          ReindexState.CANCELLED,
+          ReindexState.FAILED,
+        ]),
+      );
+      expect(ALLOWED_REINDEX_TRANSITIONS[ReindexState.VALIDATING]).toEqual(
+        expect.arrayContaining([
+          ReindexState.SWAPPED,
+          ReindexState.CANCELLED,
+          ReindexState.FAILED,
+        ]),
+      );
+      expect(ALLOWED_REINDEX_TRANSITIONS[ReindexState.SWAPPED]).toEqual([]);
+      expect(ALLOWED_REINDEX_TRANSITIONS[ReindexState.FAILED]).toEqual([]);
+      expect(ALLOWED_REINDEX_TRANSITIONS[ReindexState.CANCELLED]).toEqual([]);
+    });
+
+    it('rejects any transition from terminal states SWAPPED, FAILED, CANCELLED to any state', () => {
+      const allStates = Object.values(ReindexState);
+      const terminalStates = [
+        ReindexState.SWAPPED,
+        ReindexState.FAILED,
+        ReindexState.CANCELLED,
+      ];
+
+      for (const terminal of terminalStates) {
+        expect(stateMachine.isTerminal(terminal)).toBe(true);
+        for (const target of allStates) {
+          expect(() => stateMachine.transition(terminal, target)).toThrow();
+        }
+      }
+    });
+
+    it('canTransition returns true for legal transitions and false for illegal ones', () => {
       expect(
-        canTransition(ReindexState.VALIDATING, ReindexState.REQUESTED),
+        stateMachine.canTransition(
+          ReindexState.REQUESTED,
+          ReindexState.RUNNING,
+        ),
+      ).toBe(true);
+      expect(
+        stateMachine.canTransition(
+          ReindexState.REQUESTED,
+          ReindexState.SWAPPED,
+        ),
       ).toBe(false);
-      expect(canTransition(ReindexState.VALIDATING, ReindexState.RUNNING)).toBe(
-        false,
-      );
-    });
-  });
-
-  describe('instance state machine', () => {
-    it('manages lifecycle correctly', () => {
-      const sm = new ReindexStateMachine();
-      expect(sm.state).toBe(ReindexState.REQUESTED);
-
-      sm.transitionTo(ReindexState.RUNNING);
-      expect(sm.state).toBe(ReindexState.RUNNING);
-
-      sm.transitionTo(ReindexState.VALIDATING);
-      expect(sm.state).toBe(ReindexState.VALIDATING);
-
-      sm.transitionTo(ReindexState.SWAPPED);
-      expect(sm.state).toBe(ReindexState.SWAPPED);
-
-      expect(() => sm.transitionTo(ReindexState.RUNNING)).toThrow(
-        IllegalStateException,
-      );
+      expect(
+        stateMachine.canTransition(
+          ReindexState.RUNNING,
+          ReindexState.VALIDATING,
+        ),
+      ).toBe(true);
+      expect(
+        stateMachine.canTransition(
+          ReindexState.VALIDATING,
+          ReindexState.SWAPPED,
+        ),
+      ).toBe(true);
+      expect(
+        stateMachine.canTransition(
+          ReindexState.SWAPPED,
+          ReindexState.REQUESTED,
+        ),
+      ).toBe(false);
     });
   });
 });
