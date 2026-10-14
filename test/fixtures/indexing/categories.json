@@ -1,0 +1,50 @@
+[
+  {
+    "event_id": "01912f70-cat-001-root",
+    "schema_version": 1,
+    "event_type": "category.created",
+    "occurred_at": "2026-10-14T10:00:00Z",
+    "aggregate_type": "CATEGORY",
+    "aggregate_id": "cat-root-electronics",
+    "version": 1,
+    "payload": {
+      "category_id": "cat-root-electronics",
+      "name": "Electronics",
+      "parent_id": null,
+      "path_ids": ["cat-root-electronics"],
+      "status": "ACTIVE"
+    }
+  },
+  {
+    "event_id": "01912f70-cat-002-child",
+    "schema_version": 1,
+    "event_type": "category.created",
+    "occurred_at": "2026-10-14T10:01:00Z",
+    "aggregate_type": "CATEGORY",
+    "aggregate_id": "cat-child-phones",
+    "version": 1,
+    "payload": {
+      "category_id": "cat-child-phones",
+      "name": "Phones",
+      "parent_id": "cat-root-electronics",
+      "path_ids": ["cat-root-electronics", "cat-child-phones"],
+      "status": "ACTIVE"
+    }
+  },
+  {
+    "event_id": "01912f70-cat-003-leaf",
+    "schema_version": 1,
+    "event_type": "category.created",
+    "occurred_at": "2026-10-14T10:02:00Z",
+    "aggregate_type": "CATEGORY",
+    "aggregate_id": "cat-leaf-smartphones",
+    "version": 1,
+    "payload": {
+      "category_id": "cat-leaf-smartphones",
+      "name": "Smartphones",
+      "parent_id": "cat-child-phones",
+      "path_ids": ["cat-root-electronics", "cat-child-phones", "cat-leaf-smartphones"],
+      "status": "ACTIVE"
+    }
+  }
+]

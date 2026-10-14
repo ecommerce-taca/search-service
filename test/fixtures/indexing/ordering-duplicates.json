@@ -1,0 +1,46 @@
+[
+  {
+    "event_id": "01912f70-prod-001-published",
+    "schema_version": 1,
+    "event_type": "product.published",
+    "occurred_at": "2026-10-14T11:05:00Z",
+    "aggregate_type": "PRODUCT",
+    "aggregate_id": "prod-001-published",
+    "version": 2,
+    "payload": {
+      "product_id": "prod-001-published",
+      "shop_id": "shop-01912f30",
+      "title": "Áo khoác cotton Taca DUPLICATE",
+      "slug": "ao-khoac-cotton-taca",
+      "category_path": ["fashion", "outerwear"],
+      "brand": "Taca Brand",
+      "price": {
+        "sale": 249000,
+        "currency": "VND"
+      },
+      "attributes": {
+        "material": "cotton"
+      },
+      "media": [
+        {
+          "url": "https://cdn.example/coat.jpg",
+          "alt": "Áo khoác"
+        }
+      ],
+      "visibility_status": "PUBLISHED"
+    }
+  },
+  {
+    "event_id": "01912f70-prod-001-stale-v1",
+    "schema_version": 1,
+    "event_type": "product.updated",
+    "occurred_at": "2026-10-14T10:50:00Z",
+    "aggregate_type": "PRODUCT",
+    "aggregate_id": "prod-001-published",
+    "version": 1,
+    "payload": {
+      "product_id": "prod-001-published",
+      "title": "Áo khoác STALE VERSION"
+    }
+  }
+]

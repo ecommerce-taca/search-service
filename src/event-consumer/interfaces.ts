@@ -4,7 +4,7 @@ export interface DomainEvent<T = unknown> {
   event_id: string;
   schema_version: number;
   event_type: string;
-  occurred_at: string;
+  occurred_at: string | number;
   aggregate_type: string;
   aggregate_id: string;
   version: number;
@@ -24,3 +24,9 @@ export interface IConsumerStatusProvider {
 }
 
 export const CONSUMER_STATUS_PROVIDER = 'IConsumerStatusProvider';
+
+export interface KafkaMessageInput {
+  headers?: Record<string, Buffer | string | undefined | (Buffer | string)[]>;
+  value: Buffer | string | null;
+  offset: string;
+}

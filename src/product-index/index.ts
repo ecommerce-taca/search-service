@@ -3,4 +3,8 @@ export * from './mappings';
 export * from './interfaces';
 export * from './index-bootstrap.service';
 export * from './category-projection.service';
+export * from './document-builder/product-document.builder';
+export * from './sku/variant-aggregator';
+export * from './writer/es-index-writer';
+export * from './projection/category-projection.writer';
 export * from './product-index.module';
