@@ -5,6 +5,7 @@ import {
   getConsumerStateIndex,
   getProductsAlias,
   getReindexJobsIndex,
+  getSearchCategoriesIndex,
 } from '../src/common/constants';
 import { AppConfigService } from '../src/config/config.service';
 import { ELASTICSEARCH_CLIENT } from '../src/product-index/elasticsearch.module';
@@ -15,15 +16,19 @@ describe('IndexBootstrapService (Integration on real ES cluster)', () => {
   let client: Client;
   let moduleRef: TestingModule;
 
-  const testPrefix = `it-bootstrap-${Date.now()}-`;
+  const testPrefix = process.env.ES_INDEX_PREFIX
+    ? `${process.env.ES_INDEX_PREFIX}${Date.now()}-`
+    : `it-bootstrap-${Date.now()}-`;
 
   const mockConfigService = {
-    esNode: 'http://192.168.100.23:30920',
+    esNode: process.env.ES_NODE || 'http://192.168.100.23:30920',
     esIndexPrefix: testPrefix,
     serviceName: 'search-service',
     appEnv: 'test',
     appVersion: '1.0.0',
-    kafkaBrokers: ['192.168.100.23:31714'],
+    kafkaBrokers: process.env.KAFKA_BROKERS
+      ? process.env.KAFKA_BROKERS.split(',')
+      : ['192.168.100.23:31714'],
     kafkaClientId: 'search-service',
     kafkaGroupId: 'search-service-group',
     kafkaTopicPrefix: '',
@@ -78,6 +83,11 @@ describe('IndexBootstrapService (Integration on real ES cluster)', () => {
       if (await client.indices.exists({ index: reindexIndex })) {
         await client.indices.delete({ index: reindexIndex });
       }
+
+      const categoriesIndex = getSearchCategoriesIndex(testPrefix);
+      if (await client.indices.exists({ index: categoriesIndex })) {
+        await client.indices.delete({ index: categoriesIndex });
+      }
     } catch (cleanupErr) {
       console.warn('Error during ES cleanup:', cleanupErr);
     }
@@ -92,6 +102,7 @@ describe('IndexBootstrapService (Integration on real ES cluster)', () => {
     expect(result.aliasCreated).toBe(true);
     expect(result.consumerStateCreated).toBe(true);
     expect(result.reindexJobsCreated).toBe(true);
+    expect(result.searchCategoriesCreated).toBe(true);
 
     const aliasName = getProductsAlias(testPrefix);
     const aliasExists = await client.indices.existsAlias({ name: aliasName });
@@ -108,6 +119,12 @@ describe('IndexBootstrapService (Integration on real ES cluster)', () => {
       index: reindexJobsIndex,
     });
     expect(reindexExists).toBe(true);
+
+    const searchCategoriesIndex = getSearchCategoriesIndex(testPrefix);
+    const categoriesExists = await client.indices.exists({
+      index: searchCategoriesIndex,
+    });
+    expect(categoriesExists).toBe(true);
   });
 
   it('should be idempotent when called a second time', async () => {
@@ -116,5 +133,6 @@ describe('IndexBootstrapService (Integration on real ES cluster)', () => {
     expect(secondRun.aliasCreated).toBe(false);
     expect(secondRun.consumerStateCreated).toBe(false);
     expect(secondRun.reindexJobsCreated).toBe(false);
+    expect(secondRun.searchCategoriesCreated).toBe(false);
   });
 });
