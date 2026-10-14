@@ -213,7 +213,9 @@ describe('Suggest Autocomplete (e2e)', () => {
   });
 
   it('AC-E-07: Sensitive string in prefix is not leaked in plain text logs', async () => {
-    const loggerSpy = jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => {});
+    const loggerSpy = jest
+      .spyOn(Logger.prototype, 'debug')
+      .mockImplementation(() => {});
     const sensitive = '0912345678';
 
     await request(app.getHttpServer())
@@ -277,7 +279,9 @@ describe('Suggest Autocomplete (e2e)', () => {
     mockEsClient.search.mockRejectedValue(
       new errors.ConnectionError(
         'ES connection refused',
-        {} as unknown as ConstructorParameters<typeof errors.ConnectionError>[1],
+        {} as unknown as ConstructorParameters<
+          typeof errors.ConnectionError
+        >[1],
       ),
     );
 

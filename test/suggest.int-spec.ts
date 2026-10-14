@@ -15,7 +15,10 @@ import {
   PRODUCTS_INDEX_MAPPING_V1,
   PRODUCTS_INDEX_SETTINGS_V1,
 } from '../src/product-index/mappings';
-import { SuggestService, Suggestion } from '../src/autocomplete/suggest.service';
+import {
+  SuggestService,
+  Suggestion,
+} from '../src/autocomplete/suggest.service';
 
 describe('SuggestService (Integration on real ES cluster)', () => {
   let service: SuggestService;
@@ -28,7 +31,11 @@ describe('SuggestService (Integration on real ES cluster)', () => {
     : `it-suggest-${rand}-`;
 
   const aliasName = getProductsAlias(testPrefix);
-  const concreteIndex = getVersionedIndexName(1, formatUtcTimestamp(), testPrefix);
+  const concreteIndex = getVersionedIndexName(
+    1,
+    formatUtcTimestamp(),
+    testPrefix,
+  );
 
   const esNode =
     process.env.ES_NODE && !process.env.ES_NODE.includes('127.0.0.1')
@@ -65,10 +72,22 @@ describe('SuggestService (Integration on real ES cluster)', () => {
               requestTimeout: ES_REQUEST_TIMEOUT_MS,
             });
             const originalSearch = rawClient.search.bind(rawClient);
-            rawClient.search = ((params: any, options?: any) => {
-              if (params && params.requestTimeout) {
-                const { requestTimeout, ...restParams } = params;
-                return originalSearch(restParams, { requestTimeout, ...options });
+            rawClient.search = ((
+              params: Parameters<typeof originalSearch>[0],
+              options?: Parameters<typeof originalSearch>[1],
+            ) => {
+              if (params && 'requestTimeout' in params) {
+                const { requestTimeout, ...restParams } = params as Record<
+                  string,
+                  unknown
+                >;
+                return originalSearch(
+                  restParams as Parameters<typeof originalSearch>[0],
+                  {
+                    requestTimeout: requestTimeout as number,
+                    ...options,
+                  },
+                );
               }
               return originalSearch(params, options);
             }) as typeof rawClient.search;
@@ -160,7 +179,8 @@ describe('SuggestService (Integration on real ES cluster)', () => {
         product_id: 'product-outerwear-long',
         shop_id: 'shop-01912f30',
         title: 'Áo khoác gió chống nước thể thao cao cấp hai lớp mùa đông',
-        title_exact: 'Áo khoác gió chống nước thể thao cao cấp hai lớp mùa đông',
+        title_exact:
+          'Áo khoác gió chống nước thể thao cao cấp hai lớp mùa đông',
         slug: 'ao-khoac-gio-chong-nuoc-the-thao-cao-cap',
         description: 'Áo khoác cao cấp chống nước',
         category_ids: ['category-fashion', 'category-outerwear'],
@@ -239,17 +259,26 @@ describe('SuggestService (Integration on real ES cluster)', () => {
   });
 
   it('AC-I-01: returns folded matches (QUERY, PRODUCT, BRAND) and excludes HIDDEN/DELETED products', async () => {
-    const results: Suggestion[] = await service.suggest({ prefix: 'ao', limit: 10 });
+    const results: Suggestion[] = await service.suggest({
+      prefix: 'ao',
+      limit: 10,
+    });
 
     expect(results.length).toBeGreaterThan(0);
 
     // Verify QUERY suggestion exists
-    const querySuggestions = results.filter((r) => r.type === SuggestionType.QUERY);
+    const querySuggestions = results.filter(
+      (r) => r.type === SuggestionType.QUERY,
+    );
     expect(querySuggestions.length).toBeGreaterThan(0);
-    expect(querySuggestions.some((q) => q.text.includes('áo khoác'))).toBe(true);
+    expect(querySuggestions.some((q) => q.text.includes('áo khoác'))).toBe(
+      true,
+    );
 
     // Verify PRODUCT suggestions exist with product_id
-    const productSuggestions = results.filter((r) => r.type === SuggestionType.PRODUCT);
+    const productSuggestions = results.filter(
+      (r) => r.type === SuggestionType.PRODUCT,
+    );
     expect(productSuggestions.length).toBeGreaterThan(0);
     const prodIds = productSuggestions.map((p) => p.product_id);
     expect(prodIds).toContain('product-outerwear-long');
@@ -281,10 +310,16 @@ describe('SuggestService (Integration on real ES cluster)', () => {
       category_id: 'category-outerwear',
     });
 
-    const productSuggestions = results.filter((r) => r.type === SuggestionType.PRODUCT);
+    const productSuggestions = results.filter(
+      (r) => r.type === SuggestionType.PRODUCT,
+    );
     expect(productSuggestions.length).toBeGreaterThan(0);
     for (const p of productSuggestions) {
-      expect(['product-outerwear-long', 'product-01912f31', 'product-01912f32']).toContain(p.product_id);
+      expect([
+        'product-outerwear-long',
+        'product-01912f31',
+        'product-01912f32',
+      ]).toContain(p.product_id);
     }
   });
 
@@ -301,11 +336,17 @@ describe('SuggestService (Integration on real ES cluster)', () => {
   it('AC-I-06: returns BRAND suggestion alongside PRODUCT and QUERY suggestions for prefix apple', async () => {
     const results = await service.suggest({ prefix: 'apple', limit: 10 });
 
-    const brandSuggestions = results.filter((r) => r.type === SuggestionType.BRAND);
+    const brandSuggestions = results.filter(
+      (r) => r.type === SuggestionType.BRAND,
+    );
     expect(brandSuggestions.length).toBeGreaterThan(0);
-    expect(brandSuggestions.some((b) => b.text.toLowerCase() === 'apple')).toBe(true);
+    expect(brandSuggestions.some((b) => b.text.toLowerCase() === 'apple')).toBe(
+      true,
+    );
 
-    const productSuggestions = results.filter((r) => r.type === SuggestionType.PRODUCT);
+    const productSuggestions = results.filter(
+      (r) => r.type === SuggestionType.PRODUCT,
+    );
     expect(productSuggestions.length).toBeGreaterThan(0);
   });
 
@@ -322,7 +363,10 @@ describe('SuggestService (Integration on real ES cluster)', () => {
   });
 
   it('AC-I-09: returns empty array for non-existent prefix (does not throw 404)', async () => {
-    const results = await service.suggest({ prefix: 'xyznonexistent', limit: 10 });
+    const results = await service.suggest({
+      prefix: 'xyznonexistent',
+      limit: 10,
+    });
 
     expect(results).toEqual([]);
   });

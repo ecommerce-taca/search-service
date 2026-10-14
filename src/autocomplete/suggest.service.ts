@@ -1,4 +1,4 @@
-import { Client } from '@elastic/elasticsearch';
+import { Client, estypes } from '@elastic/elasticsearch';
 import { Injectable, Logger } from '@nestjs/common';
 import { ES_REQUEST_TIMEOUT_MS, getProductsAlias } from '../common/constants';
 import { SuggestionType } from '../common/enums';
@@ -12,6 +12,17 @@ export interface Suggestion {
   text: string;
   type: SuggestionType;
   product_id?: string;
+}
+
+export interface ProductDocSource {
+  product_id?: string;
+  title?: string;
+  visibility_status?: string;
+  category_ids?: string | string[];
+}
+
+export interface SuggestSearchRequest extends estypes.SearchRequest {
+  requestTimeout?: number;
 }
 
 export function foldText(str: string): string {
@@ -50,11 +61,6 @@ export function extractPhrase(
   return truncated.toLowerCase();
 }
 
-function attachErrorCode(ex: SearchException): SearchException {
-  (ex as unknown as { errorCode: SearchErrorCode }).errorCode = ex.code;
-  return ex;
-}
-
 @Injectable()
 export class SuggestService {
   private readonly logger = new Logger(SuggestService.name);
@@ -65,76 +71,129 @@ export class SuggestService {
   ) {}
 
   async suggest(query: SuggestQueryDto): Promise<Suggestion[]> {
+    const { trimmedPrefix, limit, codePoints } = this.validate(query);
+
+    this.logger.debug({
+      event: 'suggest_query',
+      prefix_length: codePoints,
+      limit,
+      has_category: Boolean(query?.category_id),
+    });
+
+    const searchRequest = this.buildRequest(
+      trimmedPrefix,
+      limit,
+      query?.category_id,
+    );
+
+    let res: estypes.SearchResponse<ProductDocSource>;
+    try {
+      res = await this.client.search<ProductDocSource>(searchRequest);
+    } catch (err: unknown) {
+      throw toSearchException(err);
+    }
+
+    const foldedPrefix = foldText(trimmedPrefix);
+    const querySuggestions = this.toQuerySuggestions(res, foldedPrefix);
+    const productSuggestions = this.toProductSuggestions(
+      res,
+      query?.category_id,
+    );
+    const brandSuggestions = this.toBrandSuggestions(res, foldedPrefix);
+
+    return this.merge(
+      querySuggestions,
+      productSuggestions,
+      brandSuggestions,
+      limit,
+    );
+  }
+
+  private validate(query: SuggestQueryDto): {
+    trimmedPrefix: string;
+    limit: number;
+    codePoints: number;
+  } {
     if (
       query?.prefix === undefined ||
       query?.prefix === null ||
       typeof query.prefix !== 'string'
     ) {
-      throw attachErrorCode(
-        new SearchException(
-          SearchErrorCode.SEARCH_INVALID_INPUT,
-          undefined,
-          'prefix is required',
-        ),
+      throw new SearchException(
+        SearchErrorCode.SEARCH_INVALID_INPUT,
+        undefined,
+        "Query parameter 'prefix' is required.",
       );
     }
 
     const trimmedPrefix = query.prefix.trim();
     if (trimmedPrefix.length === 0) {
-      throw attachErrorCode(
-        new SearchException(
-          SearchErrorCode.SEARCH_INVALID_INPUT,
-          undefined,
-          'prefix cannot be empty',
-        ),
+      throw new SearchException(
+        SearchErrorCode.SEARCH_INVALID_INPUT,
+        undefined,
+        "Query parameter 'prefix' cannot be empty.",
       );
     }
 
     const codePoints = Array.from(trimmedPrefix).length;
     if (codePoints > 100) {
-      throw attachErrorCode(
-        new SearchException(
-          SearchErrorCode.SEARCH_QUERY_TOO_LONG,
-          undefined,
-          'prefix exceeds max length of 100 characters',
-        ),
+      throw new SearchException(
+        SearchErrorCode.SEARCH_QUERY_TOO_LONG,
+        undefined,
+        "Query parameter 'prefix' exceeds 100 characters.",
       );
     }
 
     const limit = query.limit ?? 10;
     if (
       typeof limit !== 'number' ||
-      isNaN(limit) ||
+      Number.isNaN(limit) ||
       !Number.isInteger(limit) ||
       limit < 1 ||
       limit > 10
     ) {
-      throw attachErrorCode(
-        new SearchException(
-          SearchErrorCode.SEARCH_INVALID_INPUT,
-          undefined,
-          'limit must be a positive integer between 1 and 10',
-        ),
+      throw new SearchException(
+        SearchErrorCode.SEARCH_INVALID_INPUT,
+        undefined,
+        limit > 10
+          ? 'Limit cannot exceed 10.'
+          : 'limit must be a positive integer between 1 and 10',
       );
     }
 
-    this.logger.debug({
-      event: 'suggest_query',
-      prefix_length: codePoints,
-      limit,
-      has_category: Boolean(query.category_id),
-    });
+    return { trimmedPrefix, limit, codePoints };
+  }
 
+  private buildRequest(
+    trimmedPrefix: string,
+    limit: number,
+    categoryId?: string,
+  ): SuggestSearchRequest {
     const alias = getProductsAlias(this.configService.esIndexPrefix);
 
-    const filter: Record<string, unknown>[] = [
+    const filter: estypes.QueryDslQueryContainer[] = [
       { term: { visibility_status: 'PUBLISHED' } },
     ];
-    if (query.category_id) {
-      filter.push({ term: { category_ids: query.category_id } });
+    if (categoryId) {
+      filter.push({ term: { category_ids: categoryId } });
     }
 
-    const searchParams = {
+    const brandFilter: estypes.QueryDslQueryContainer[] = [
+      { term: { visibility_status: 'PUBLISHED' } },
+    ];
+    if (categoryId) {
+      brandFilter.push({ term: { category_ids: categoryId } });
+    }
+    brandFilter.push({
+      prefix: {
+        brand: {
+          value: trimmedPrefix,
+          case_insensitive: true,
+        },
+      },
+    });
+
+    return {
       index: alias,
       requestTimeout: ES_REQUEST_TIMEOUT_MS,
       _source: ['product_id', 'title', 'visibility_status', 'category_ids'],
@@ -164,67 +223,34 @@ export class SuggestService {
         },
       },
       aggregations: {
-        brand_terms: {
-          terms: {
-            field: 'brand',
-            size: 50,
+        brands_global: {
+          global: {},
+          aggregations: {
+            brands_filtered: {
+              filter: {
+                bool: {
+                  filter: brandFilter,
+                },
+              },
+              aggregations: {
+                brand_terms: {
+                  terms: {
+                    field: 'brand',
+                    size: limit,
+                  },
+                },
+              },
+            },
           },
         },
       },
     };
+  }
 
-    let res: {
-      hits?: {
-        hits?: Array<{
-          _source?: {
-            product_id?: string;
-            title?: string;
-            visibility_status?: string;
-            category_ids?: string | string[];
-          };
-        }>;
-      };
-      suggest?: {
-        product_suggest?: Array<{
-          options?: Array<{
-            text?: string;
-            _source?: {
-              product_id?: string;
-              title?: string;
-              visibility_status?: string;
-              category_ids?: string | string[];
-            };
-          }>;
-        }>;
-      };
-      aggregations?: {
-        brand_terms?: {
-          buckets?: Array<{
-            key?: string | number;
-            doc_count?: number;
-          }>;
-        };
-      };
-      aggs?: {
-        brand_terms?: {
-          buckets?: Array<{
-            key?: string | number;
-            doc_count?: number;
-          }>;
-        };
-      };
-    };
-
-    try {
-      res = await this.client.search(searchParams);
-    } catch (err: unknown) {
-      const searchEx = toSearchException(err);
-      throw attachErrorCode(searchEx);
-    }
-
-    const foldedPrefix = foldText(trimmedPrefix);
-
-    // 1. QUERY suggestions (D11)
+  private toQuerySuggestions(
+    res: estypes.SearchResponse<ProductDocSource>,
+    foldedPrefix: string,
+  ): Suggestion[] {
     const hits = res.hits?.hits || [];
     const phraseFrequency = new Map<string, number>();
 
@@ -245,30 +271,37 @@ export class SuggestService {
       return a[0].localeCompare(b[0], 'vi');
     });
 
-    const querySuggestions: Suggestion[] = sortedPhrases.map(([text]) => ({
+    return sortedPhrases.map(([text]) => ({
       text,
       type: SuggestionType.QUERY,
     }));
+  }
 
-    // 2. PRODUCT suggestions
+  private toProductSuggestions(
+    res: estypes.SearchResponse<ProductDocSource>,
+    categoryId?: string,
+  ): Suggestion[] {
     const productSuggestions: Suggestion[] = [];
-    const suggestBlocks = res.suggest?.product_suggest || [];
+    const suggestBlocks = (res.suggest?.product_suggest || []) as Array<
+      estypes.SearchCompletionSuggest<ProductDocSource>
+    >;
 
     for (const block of suggestBlocks) {
-      const options = block.options || [];
+      const rawOptions = block.options || [];
+      const options = Array.isArray(rawOptions) ? rawOptions : [rawOptions];
       for (const opt of options) {
-        const source = opt._source || {};
+        const source = (opt._source || {}) as ProductDocSource;
         if (source.visibility_status !== 'PUBLISHED') {
           continue;
         }
 
-        if (query.category_id) {
+        if (categoryId) {
           const catIds = Array.isArray(source.category_ids)
             ? source.category_ids
             : source.category_ids
               ? [source.category_ids]
               : [];
-          if (!catIds.includes(query.category_id)) {
+          if (!catIds.includes(categoryId)) {
             continue;
           }
         }
@@ -284,23 +317,44 @@ export class SuggestService {
       }
     }
 
-    // 3. BRAND suggestions
-    const brandSuggestions: Suggestion[] = [];
-    const brandBuckets =
-      res.aggregations?.brand_terms?.buckets ||
-      res.aggs?.brand_terms?.buckets ||
-      [];
+    return productSuggestions;
+  }
 
-    for (const bucket of brandBuckets) {
+  private toBrandSuggestions(
+    res: estypes.SearchResponse<ProductDocSource>,
+    foldedPrefix: string,
+  ): Suggestion[] {
+    const brandSuggestions: Suggestion[] = [];
+    const aggs = res.aggregations;
+    if (!aggs) {
+      return brandSuggestions;
+    }
+
+    let buckets: Array<{ key?: string | number; doc_count?: number }> = [];
+
+    const globalAgg = aggs.brands_global as
+      | (estypes.AggregationsGlobalAggregate & Record<string, unknown>)
+      | undefined;
+    if (globalAgg?.brands_filtered) {
+      const filterAgg = globalAgg.brands_filtered as
+        | (estypes.AggregationsFilterAggregate & Record<string, unknown>)
+        | undefined;
+      const termsAgg = filterAgg?.brand_terms as
+        estypes.AggregationsStringTermsAggregate | undefined;
+      if (Array.isArray(termsAgg?.buckets)) {
+        buckets = termsAgg.buckets;
+      }
+    } else if (aggs.brand_terms) {
+      const termsAgg = aggs.brand_terms as
+        estypes.AggregationsStringTermsAggregate | undefined;
+      if (Array.isArray(termsAgg?.buckets)) {
+        buckets = termsAgg.buckets;
+      }
+    }
+
+    for (const bucket of buckets) {
       const brandName = String(bucket.key ?? '');
-      if (
-        brandName &&
-        (foldText(brandName).startsWith(foldedPrefix) ||
-          (hits.length === 1 &&
-            brandBuckets.length === 1 &&
-            foldText(brandName) === 'apple' &&
-            foldedPrefix === 'ip'))
-      ) {
+      if (brandName && foldText(brandName).startsWith(foldedPrefix)) {
         brandSuggestions.push({
           text: brandName,
           type: SuggestionType.BRAND,
@@ -308,7 +362,15 @@ export class SuggestService {
       }
     }
 
-    // 4. Merge D12: QUERY first, then PRODUCT, then BRAND; dedupe by folded text; cut to limit
+    return brandSuggestions;
+  }
+
+  private merge(
+    querySuggestions: Suggestion[],
+    productSuggestions: Suggestion[],
+    brandSuggestions: Suggestion[],
+    limit: number,
+  ): Suggestion[] {
     const combined: Suggestion[] = [
       ...querySuggestions,
       ...productSuggestions,

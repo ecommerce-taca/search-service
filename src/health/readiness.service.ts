@@ -5,35 +5,16 @@ import { SearchErrorCode } from '../common/errors/error-codes';
 import { SearchException } from '../common/errors/search.exception';
 import { toSearchException } from '../common/es';
 import { AppConfigService } from '../config/config.service';
-
-export const CONSUMER_STATUS_PROVIDER = 'CONSUMER_STATUS_PROVIDER';
-
-export interface ConsumerStatus {
-  consumer?: string;
-  status?: string;
-  event_lag_seconds?: number;
-  lag_seconds?: number;
-}
-
-export interface ConsumerStatusProvider {
-  getStatus?(): ConsumerStatus | Promise<ConsumerStatus>;
-  getConsumerStatus?(): ConsumerStatus | Promise<ConsumerStatus>;
-  consumer?: string;
-  status?: string;
-  event_lag_seconds?: number;
-  lag_seconds?: number;
-}
+import {
+  CONSUMER_STATUS_PROVIDER,
+  IConsumerStatusProvider,
+} from '../event-consumer/interfaces';
 
 export interface ReadinessReport {
   elasticsearch: 'UP';
   alias: string;
   consumer: string;
   event_lag_seconds: number;
-}
-
-function attachErrorCode(ex: SearchException): SearchException {
-  (ex as unknown as { errorCode: SearchErrorCode }).errorCode = ex.code;
-  return ex;
 }
 
 @Injectable()
@@ -45,7 +26,7 @@ export class ReadinessService {
     private readonly configService: AppConfigService,
     @Optional()
     @Inject(CONSUMER_STATUS_PROVIDER)
-    private readonly consumerStatusProvider?: ConsumerStatusProvider,
+    private readonly provider?: IConsumerStatusProvider,
   ) {}
 
   async check(): Promise<ReadinessReport> {
@@ -73,24 +54,20 @@ export class ReadinessService {
       }
 
       if (!healthy) {
-        throw attachErrorCode(
-          new SearchException(
-            SearchErrorCode.SEARCH_UNAVAILABLE,
-            undefined,
-            'Elasticsearch connection refused or timed out',
-          ),
+        throw new SearchException(
+          SearchErrorCode.SEARCH_UNAVAILABLE,
+          undefined,
+          'Elasticsearch connection refused or timed out',
         );
       }
     } catch (err: unknown) {
       if (err instanceof SearchException) {
-        throw attachErrorCode(err);
+        throw err;
       }
-      throw attachErrorCode(
-        new SearchException(
-          SearchErrorCode.SEARCH_UNAVAILABLE,
-          undefined,
-          'Elasticsearch connection refused or timed out',
-        ),
+      throw new SearchException(
+        SearchErrorCode.SEARCH_UNAVAILABLE,
+        undefined,
+        'Elasticsearch connection refused or timed out',
       );
     }
 
@@ -104,43 +81,29 @@ export class ReadinessService {
           : Boolean((exists as unknown as { body?: boolean })?.body ?? exists);
 
       if (!aliasExists) {
-        throw attachErrorCode(
-          new SearchException(
-            SearchErrorCode.SEARCH_INDEX_NOT_READY,
-            undefined,
-            `Required alias ${alias} not found`,
-          ),
+        throw new SearchException(
+          SearchErrorCode.SEARCH_INDEX_NOT_READY,
+          undefined,
+          `Required alias ${alias} not found`,
         );
       }
     } catch (err: unknown) {
       if (err instanceof SearchException) {
-        throw attachErrorCode(err);
+        throw err;
       }
-      const searchEx = toSearchException(err);
-      throw attachErrorCode(searchEx);
+      throw toSearchException(err);
     }
 
     // 3. Consumer status provider check (optional)
     let consumer = 'PAUSED';
     let eventLagSeconds = 0;
 
-    if (this.consumerStatusProvider) {
+    if (this.provider) {
       try {
-        let resolved: ConsumerStatus | undefined;
-        if (typeof this.consumerStatusProvider.getStatus === 'function') {
-          resolved = await this.consumerStatusProvider.getStatus();
-        } else if (
-          typeof this.consumerStatusProvider.getConsumerStatus === 'function'
-        ) {
-          resolved = await this.consumerStatusProvider.getConsumerStatus();
-        } else {
-          resolved = this.consumerStatusProvider;
-        }
-
+        const resolved = await this.provider.getStatus();
         if (resolved) {
-          consumer = resolved.consumer ?? resolved.status ?? 'PAUSED';
-          eventLagSeconds =
-            resolved.event_lag_seconds ?? resolved.lag_seconds ?? 0;
+          consumer = resolved.state;
+          eventLagSeconds = Math.round(resolved.maxLagSeconds ?? 0);
         }
       } catch (providerErr: unknown) {
         this.logger.warn({

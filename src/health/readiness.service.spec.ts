@@ -2,15 +2,16 @@ import { Client, errors } from '@elastic/elasticsearch';
 import { Provider } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getProductsAlias } from '../common/constants';
+import { ConsumerState } from '../common/enums';
 import { SearchErrorCode } from '../common/errors/error-codes';
 import { SearchException } from '../common/errors/search.exception';
 import { AppConfigService } from '../config/config.service';
-import { ELASTICSEARCH_CLIENT } from '../product-index/elasticsearch.module';
 import {
   CONSUMER_STATUS_PROVIDER,
-  ConsumerStatusProvider,
-  ReadinessService,
-} from './readiness.service';
+  IConsumerStatusProvider,
+} from '../event-consumer/interfaces';
+import { ELASTICSEARCH_CLIENT } from '../product-index/elasticsearch.module';
+import { ReadinessService } from './readiness.service';
 
 describe('ReadinessService (Unit)', () => {
   let service: ReadinessService;
@@ -21,11 +22,11 @@ describe('ReadinessService (Unit)', () => {
   let mockConfigService: {
     esIndexPrefix: string;
   };
-  let mockConsumerProvider: ConsumerStatusProvider | undefined;
+  let mockConsumerProvider: IConsumerStatusProvider | undefined;
 
   const aliasName = getProductsAlias('test-');
 
-  const createService = async (consumerProvider?: ConsumerStatusProvider) => {
+  const createService = async (consumerProvider?: IConsumerStatusProvider) => {
     const providers: Provider[] = [
       ReadinessService,
       {
@@ -79,8 +80,11 @@ describe('ReadinessService (Unit)', () => {
     it('HL-U-01: returns UP, alias, consumer, and lag when everything is healthy', async () => {
       mockConsumerProvider = {
         getStatus: jest.fn().mockResolvedValue({
-          consumer: 'RUNNING',
-          event_lag_seconds: 2,
+          state: ConsumerState.RUNNING,
+          lagByTopic: {},
+          maxLagSeconds: 2.1,
+          lastEventAt: null,
+          dlqCount: 0,
         }),
       };
       service = await createService(mockConsumerProvider);
@@ -114,7 +118,6 @@ describe('ReadinessService (Unit)', () => {
       await expect(service.check()).rejects.toThrow(SearchException);
       await expect(service.check()).rejects.toMatchObject({
         code: SearchErrorCode.SEARCH_UNAVAILABLE,
-        errorCode: SearchErrorCode.SEARCH_UNAVAILABLE,
       });
     });
 
@@ -124,7 +127,6 @@ describe('ReadinessService (Unit)', () => {
 
       await expect(service.check()).rejects.toMatchObject({
         code: SearchErrorCode.SEARCH_UNAVAILABLE,
-        errorCode: SearchErrorCode.SEARCH_UNAVAILABLE,
       });
     });
 
@@ -135,15 +137,17 @@ describe('ReadinessService (Unit)', () => {
       await expect(service.check()).rejects.toThrow(SearchException);
       await expect(service.check()).rejects.toMatchObject({
         code: SearchErrorCode.SEARCH_INDEX_NOT_READY,
-        errorCode: SearchErrorCode.SEARCH_INDEX_NOT_READY,
       });
     });
 
     it('HL-U-04: returns 200 report with consumer DEGRADED and high event lag (D14)', async () => {
       mockConsumerProvider = {
         getStatus: jest.fn().mockResolvedValue({
-          consumer: 'DEGRADED',
-          event_lag_seconds: 75,
+          state: ConsumerState.DEGRADED,
+          lagByTopic: {},
+          maxLagSeconds: 74.8,
+          lastEventAt: null,
+          dlqCount: 0,
         }),
       };
       service = await createService(mockConsumerProvider);
