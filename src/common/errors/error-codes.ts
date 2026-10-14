@@ -1,5 +1,7 @@
 import { HttpStatus } from '@nestjs/common';
 
+export const ERROR_CODE_NOT_FOUND = 'NOT_FOUND';
+
 export enum SearchErrorCode {
   SEARCH_INVALID_INPUT = 'SEARCH_INVALID_INPUT',
   SEARCH_QUERY_TOO_LONG = 'SEARCH_QUERY_TOO_LONG',
