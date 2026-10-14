@@ -1,0 +1,269 @@
+[
+  {
+    "event_id": "01912f70-prod-001-created",
+    "schema_version": 1,
+    "event_type": "product.created",
+    "occurred_at": "2026-10-14T11:00:00Z",
+    "aggregate_type": "PRODUCT",
+    "aggregate_id": "prod-001-published",
+    "version": 1,
+    "payload": {
+      "product_id": "prod-001-published",
+      "shop_id": "shop-01912f30",
+      "title": "Áo khoác cotton Taca",
+      "slug": "ao-khoac-cotton-taca",
+      "category_path": ["fashion", "outerwear"],
+      "primary_category_id": "cat-leaf-smartphones",
+      "brand": "Taca Brand",
+      "price": {
+        "sale": 249000,
+        "currency": "VND"
+      },
+      "attributes": {
+        "material": "cotton"
+      },
+      "media": [
+        {
+          "url": "https://cdn.example/coat.jpg",
+          "alt": "Áo khoác"
+        }
+      ],
+      "visibility_status": "HIDDEN",
+      "shop": {
+        "shop_id": "shop-01912f30",
+        "name": "Taca Official Shop"
+      }
+    }
+  },
+  {
+    "event_id": "01912f70-prod-001-published",
+    "schema_version": 1,
+    "event_type": "product.published",
+    "occurred_at": "2026-10-14T11:05:00Z",
+    "aggregate_type": "PRODUCT",
+    "aggregate_id": "prod-001-published",
+    "version": 2,
+    "payload": {
+      "product_id": "prod-001-published",
+      "shop_id": "shop-01912f30",
+      "title": "Áo khoác cotton Taca",
+      "slug": "ao-khoac-cotton-taca",
+      "category_path": ["fashion", "outerwear"],
+      "primary_category_id": "cat-leaf-smartphones",
+      "brand": "Taca Brand",
+      "price": {
+        "sale": 249000,
+        "currency": "VND"
+      },
+      "attributes": {
+        "material": "cotton"
+      },
+      "media": [
+        {
+          "url": "https://cdn.example/coat.jpg",
+          "alt": "Áo khoác"
+        }
+      ],
+      "visibility_status": "PUBLISHED",
+      "shop": {
+        "shop_id": "shop-01912f30",
+        "name": "Taca Official Shop"
+      }
+    }
+  },
+  {
+    "event_id": "01912f70-prod-002-created",
+    "schema_version": 1,
+    "event_type": "product.created",
+    "occurred_at": "2026-10-14T11:10:00Z",
+    "aggregate_type": "PRODUCT",
+    "aggregate_id": "prod-002-hidden",
+    "version": 1,
+    "payload": {
+      "product_id": "prod-002-hidden",
+      "shop_id": "shop-01912f30",
+      "title": "Quần jeans Taca ẩn",
+      "slug": "quan-jeans-taca-an",
+      "category_path": ["fashion", "pants"],
+      "primary_category_id": "cat-leaf-smartphones",
+      "brand": "Taca Brand",
+      "price": {
+        "sale": 350000,
+        "currency": "VND"
+      },
+      "attributes": {
+        "material": "denim"
+      },
+      "media": [
+        {
+          "url": "https://cdn.example/jeans.jpg",
+          "alt": "Quần jeans"
+        }
+      ],
+      "visibility_status": "HIDDEN",
+      "shop": {
+        "shop_id": "shop-01912f30",
+        "name": "Taca Official Shop"
+      }
+    }
+  },
+  {
+    "event_id": "01912f70-prod-002-published",
+    "schema_version": 1,
+    "event_type": "product.published",
+    "occurred_at": "2026-10-14T11:12:00Z",
+    "aggregate_type": "PRODUCT",
+    "aggregate_id": "prod-002-hidden",
+    "version": 2,
+    "payload": {
+      "product_id": "prod-002-hidden",
+      "shop_id": "shop-01912f30",
+      "title": "Quần jeans Taca ẩn",
+      "slug": "quan-jeans-taca-an",
+      "category_path": ["fashion", "pants"],
+      "primary_category_id": "cat-leaf-smartphones",
+      "brand": "Taca Brand",
+      "price": {
+        "sale": 350000,
+        "currency": "VND"
+      },
+      "attributes": {
+        "material": "denim"
+      },
+      "media": [
+        {
+          "url": "https://cdn.example/jeans.jpg",
+          "alt": "Quần jeans"
+        }
+      ],
+      "visibility_status": "PUBLISHED",
+      "shop": {
+        "shop_id": "shop-01912f30",
+        "name": "Taca Official Shop"
+      }
+    }
+  },
+  {
+    "event_id": "01912f70-prod-002-blocked",
+    "schema_version": 1,
+    "event_type": "product.blocked",
+    "occurred_at": "2026-10-14T11:15:00Z",
+    "aggregate_type": "PRODUCT",
+    "aggregate_id": "prod-002-hidden",
+    "version": 3,
+    "payload": {
+      "product_id": "prod-002-hidden",
+      "reason": "POLICY_VIOLATION"
+    }
+  },
+  {
+    "event_id": "01912f70-prod-003-created",
+    "schema_version": 1,
+    "event_type": "product.created",
+    "occurred_at": "2026-10-14T11:20:00Z",
+    "aggregate_type": "PRODUCT",
+    "aggregate_id": "prod-003-deleted",
+    "version": 1,
+    "payload": {
+      "product_id": "prod-003-deleted",
+      "shop_id": "shop-01912f30",
+      "title": "Giày thể thao Taca xoá",
+      "slug": "giay-the-thao-taca-xoa",
+      "category_path": ["fashion", "shoes"],
+      "primary_category_id": "cat-leaf-smartphones",
+      "brand": "Taca Brand",
+      "price": {
+        "sale": 500000,
+        "currency": "VND"
+      },
+      "attributes": {
+        "material": "mesh"
+      },
+      "media": [
+        {
+          "url": "https://cdn.example/shoes.jpg",
+          "alt": "Giày thể thao"
+        }
+      ],
+      "visibility_status": "HIDDEN",
+      "shop": {
+        "shop_id": "shop-01912f30",
+        "name": "Taca Official Shop"
+      }
+    }
+  },
+  {
+    "event_id": "01912f70-prod-003-published",
+    "schema_version": 1,
+    "event_type": "product.published",
+    "occurred_at": "2026-10-14T11:22:00Z",
+    "aggregate_type": "PRODUCT",
+    "aggregate_id": "prod-003-deleted",
+    "version": 2,
+    "payload": {
+      "product_id": "prod-003-deleted",
+      "shop_id": "shop-01912f30",
+      "title": "Giày thể thao Taca xoá",
+      "slug": "giay-the-thao-taca-xoa",
+      "category_path": ["fashion", "shoes"],
+      "primary_category_id": "cat-leaf-smartphones",
+      "brand": "Taca Brand",
+      "price": {
+        "sale": 500000,
+        "currency": "VND"
+      },
+      "attributes": {
+        "material": "mesh"
+      },
+      "media": [
+        {
+          "url": "https://cdn.example/shoes.jpg",
+          "alt": "Giày thể thao"
+        }
+      ],
+      "visibility_status": "PUBLISHED",
+      "shop": {
+        "shop_id": "shop-01912f30",
+        "name": "Taca Official Shop"
+      }
+    }
+  },
+  {
+    "event_id": "01912f70-prod-003-archived",
+    "schema_version": 1,
+    "event_type": "product.archived",
+    "occurred_at": "2026-10-14T11:25:00Z",
+    "aggregate_type": "PRODUCT",
+    "aggregate_id": "prod-003-deleted",
+    "version": 3,
+    "payload": {
+      "product_id": "prod-003-deleted"
+    }
+  },
+  {
+    "event_id": "01912f70-prod-004-unblocked-active",
+    "schema_version": 1,
+    "event_type": "product.unblocked",
+    "occurred_at": "2026-10-14T11:30:00Z",
+    "aggregate_type": "PRODUCT",
+    "aggregate_id": "prod-002-hidden",
+    "version": 4,
+    "payload": {
+      "product_id": "prod-002-hidden",
+      "next_status": "ACTIVE"
+    }
+  },
+  {
+    "event_id": "01912f70-prod-004-unblocked-inactive",
+    "schema_version": 1,
+    "event_type": "product.unblocked",
+    "occurred_at": "2026-10-14T11:35:00Z",
+    "aggregate_type": "PRODUCT",
+    "aggregate_id": "prod-002-hidden",
+    "version": 5,
+    "payload": {
+      "product_id": "prod-002-hidden",
+      "next_status": "INACTIVE"
+    }
+  }
+]
