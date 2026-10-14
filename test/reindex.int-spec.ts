@@ -22,18 +22,20 @@ import {
   ReindexJobDocument,
   ReindexJobRepository,
 } from '../src/reindex/job.repository';
-import { ReindexRunner } from '../src/reindex/reindex.runner';
 import {
   ReindexErrorCode,
   ReindexService,
 } from '../src/reindex/reindex.service';
+import { ValidationGate } from '../src/reindex/validation-gate';
+import { IndexCopySource } from '../src/reindex/index-copy.source';
 
 describe('Reindex & Admin (Integration on real ES cluster)', () => {
   let app: INestApplication;
   let client: Client;
   let bootstrapService: IndexBootstrapService;
   let reindexService: ReindexService;
-  let reindexRunner: ReindexRunner;
+  let validationGate: ValidationGate;
+  let indexCopySource: IndexCopySource;
   let jobRepository: ReindexJobRepository;
 
   const runId = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
@@ -118,7 +120,8 @@ describe('Reindex & Admin (Integration on real ES cluster)', () => {
     client = app.get<Client>(Client);
     bootstrapService = app.get<IndexBootstrapService>(IndexBootstrapService);
     reindexService = app.get<ReindexService>(ReindexService);
-    reindexRunner = app.get<ReindexRunner>(ReindexRunner);
+    validationGate = app.get<ValidationGate>(ValidationGate);
+    indexCopySource = app.get<IndexCopySource>(IndexCopySource);
     jobRepository = app.get<ReindexJobRepository>(ReindexJobRepository);
 
     // Bootstrap initial indices with testPrefix
@@ -417,7 +420,7 @@ describe('Reindex & Admin (Integration on real ES cluster)', () => {
       await jobRepository.create(gateJob);
 
       // Call copy step
-      await reindexRunner.executeCopyStep(gateJob);
+      await indexCopySource.copy(gateJob, testTarget);
 
       // Artificially delete 5 documents from target index to induce > 0.1% diff
       await client.delete({
@@ -427,7 +430,7 @@ describe('Reindex & Admin (Integration on real ES cluster)', () => {
       });
 
       // Call gate step separately
-      const gateResult = await reindexRunner.checkDocumentCountGate(
+      const gateResult = await validationGate.checkDocumentCountGate(
         newTargetIndex,
         testTarget,
       );
@@ -465,7 +468,7 @@ describe('Reindex & Admin (Integration on real ES cluster)', () => {
         refresh: true,
       });
 
-      const gateResult = await reindexRunner.checkSourceVersionGate(
+      const gateResult = await validationGate.checkSourceVersionGate(
         newTargetIndex,
         testTarget,
       );
@@ -491,7 +494,7 @@ describe('Reindex & Admin (Integration on real ES cluster)', () => {
       });
 
       // Empty target index fails smoke tests
-      const gateResult = await reindexRunner.checkSmokeQueriesGate(testTarget);
+      const gateResult = await validationGate.checkSmokeQueriesGate(testTarget);
 
       expect(gateResult.passed).toBe(false);
       expect(gateResult.errorCode).toBe(
@@ -546,11 +549,11 @@ describe('Reindex & Admin (Integration on real ES cluster)', () => {
 
     it('[RX-I-26] Crash during VALIDATING state re-runs validation queries idempotently', async () => {
       const validTarget = newTargetIndex;
-      const gateResult1 = await reindexRunner.checkDocumentCountGate(
+      const gateResult1 = await validationGate.checkDocumentCountGate(
         validTarget,
         validTarget,
       );
-      const gateResult2 = await reindexRunner.checkDocumentCountGate(
+      const gateResult2 = await validationGate.checkDocumentCountGate(
         validTarget,
         validTarget,
       );

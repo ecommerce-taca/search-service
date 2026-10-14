@@ -309,8 +309,10 @@ export class ReindexService {
       try {
         await this.client.indices.delete({ index: job.target_index });
       } catch (err: unknown) {
+        const errClass =
+          (err as object)?.constructor?.name || typeof err || 'UnknownError';
         this.logger.debug(
-          `Target index ${job.target_index} not deleted during cancel: ${err}`,
+          `Target index ${job.target_index} not deleted during cancel: [${errClass}]`,
         );
       }
 
@@ -394,7 +396,9 @@ export class ReindexService {
         consumerLag = cs.lagByTopic ?? {};
         dlqCount = cs.dlqCount ?? 0;
       } catch (err: unknown) {
-        this.logger.warn(`Failed to retrieve consumer status: ${err}`);
+        const errClass =
+          (err as object)?.constructor?.name || typeof err || 'UnknownError';
+        this.logger.warn(`Failed to retrieve consumer status: [${errClass}]`);
       }
     }
 

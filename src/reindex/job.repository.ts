@@ -4,6 +4,7 @@ import { getReindexJobsIndex, MAPPING_VERSION } from '../common/constants';
 import { ReindexState } from '../common/enums';
 import { SearchErrorCode } from '../common/errors/error-codes';
 import { SearchException } from '../common/errors/search.exception';
+import { toSearchException } from '../common/es/es-error.mapper';
 import { AppConfigService } from '../config/config.service';
 
 export interface ReindexJobDocument {
@@ -67,7 +68,7 @@ export class ReindexJobRepository {
       if (this.isConflictError(err)) {
         throw new SearchException(SearchErrorCode.SEARCH_REINDEX_CONFLICT);
       }
-      throw err;
+      throw toSearchException(err);
     }
   }
 
@@ -90,8 +91,10 @@ export class ReindexJobRepository {
       if (this.isNotFoundError(err)) {
         return false;
       }
-      this.logger.warn(`Failed to release lock for ${jobId}: ${err}`);
-      return false;
+      const errClass =
+        (err as object)?.constructor?.name || typeof err || 'UnknownError';
+      this.logger.warn(`Failed to release lock for ${jobId}: [${errClass}]`);
+      throw toSearchException(err);
     }
   }
 
@@ -99,12 +102,16 @@ export class ReindexJobRepository {
     const document: Partial<ReindexJobDocument> = { ...job };
     delete document.source;
     delete document.reason;
-    await this.client.index({
-      index: this.indexName,
-      id: job.job_id,
-      document,
-      refresh: 'wait_for',
-    });
+    try {
+      await this.client.index({
+        index: this.indexName,
+        id: job.job_id,
+        document,
+        refresh: 'wait_for',
+      });
+    } catch (err: unknown) {
+      throw toSearchException(err);
+    }
   }
 
   async get(jobId: string): Promise<ReindexJobRecord | null> {
@@ -133,7 +140,7 @@ export class ReindexJobRepository {
       if (this.isNotFoundError(err)) {
         return null;
       }
-      throw err;
+      throw toSearchException(err);
     }
   }
 
@@ -146,18 +153,22 @@ export class ReindexJobRepository {
     },
   ): Promise<void> {
     const updatedAt = new Date().toISOString();
-    await this.client.update({
-      index: this.indexName,
-      id: jobId,
-      doc: {
-        checkpoint: progress.checkpoint,
-        processed_count: progress.processed_count,
-        failed_count: progress.failed_count ?? 0,
-        updated_at: updatedAt,
-      },
-      doc_as_upsert: true,
-      refresh: 'wait_for',
-    });
+    try {
+      await this.client.update({
+        index: this.indexName,
+        id: jobId,
+        doc: {
+          checkpoint: progress.checkpoint,
+          processed_count: progress.processed_count,
+          failed_count: progress.failed_count ?? 0,
+          updated_at: updatedAt,
+        },
+        doc_as_upsert: true,
+        refresh: 'wait_for',
+      });
+    } catch (err: unknown) {
+      throw toSearchException(err);
+    }
   }
 
   async update(
@@ -214,7 +225,7 @@ export class ReindexJobRepository {
       if (this.isConflictError(err)) {
         throw new SearchException(SearchErrorCode.SEARCH_REINDEX_CONFLICT);
       }
-      throw err;
+      throw toSearchException(err);
     }
   }
 
@@ -231,7 +242,7 @@ export class ReindexJobRepository {
         size: 1,
       });
 
-      const hit = res.hits.hits[0];
+      const hit = res.hits?.hits?.[0];
       if (!hit || !hit._source) return null;
 
       const doc = hit._source;
@@ -245,9 +256,12 @@ export class ReindexJobRepository {
       if (this.isNotFoundError(err)) {
         return null;
       }
-      this.logger.warn(`Failed to query latest reindex job: ${err}`);
-      return null;
+      throw toSearchException(err);
     }
+  }
+
+  async findLatestJob(): Promise<ReindexJobRecord | null> {
+    return this.latest();
   }
 
   async findActiveJob(): Promise<ReindexJobDocument | null> {
@@ -273,13 +287,12 @@ export class ReindexJobRepository {
         size: 1,
       });
 
-      return res.hits.hits[0]?._source ?? null;
+      return res.hits?.hits?.[0]?._source ?? null;
     } catch (err: unknown) {
       if (this.isNotFoundError(err)) {
         return null;
       }
-      this.logger.warn(`Failed to query active reindex job: ${err}`);
-      return null;
+      throw toSearchException(err);
     }
   }
 
@@ -311,8 +324,7 @@ export class ReindexJobRepository {
       if (this.isNotFoundError(err)) {
         return false;
       }
-      this.logger.warn(`Failed to check hasActiveJob: ${err}`);
-      return false;
+      throw toSearchException(err);
     }
   }
 

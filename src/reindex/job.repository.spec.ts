@@ -392,4 +392,127 @@ describe('ReindexJobRepository (Unit)', () => {
       expect(lockDoc).toBeNull();
     });
   });
+
+  describe('Elasticsearch Error Handling & 503 Translation (BLOCKER 1)', () => {
+    const connectionError = new Error('connect ECONNREFUSED 127.0.0.1:9200');
+    connectionError.name = 'ConnectionError';
+
+    const indexNotFoundError = {
+      meta: {
+        statusCode: 404,
+        body: {
+          error: {
+            type: 'index_not_found_exception',
+            reason: 'no such index [search-reindex-jobs]',
+          },
+        },
+      },
+      statusCode: 404,
+      message: 'index_not_found_exception',
+    };
+
+    it('latest() rethrows ES ConnectionError as SearchException (503 SEARCH_UNAVAILABLE)', async () => {
+      esClient.search.mockRejectedValueOnce(connectionError);
+
+      await expect(repository.latest()).rejects.toThrow(SearchException);
+
+      esClient.search.mockRejectedValueOnce(connectionError);
+      try {
+        await repository.latest();
+        fail('expected to throw');
+      } catch (err: unknown) {
+        const e = err as SearchException;
+        expect(e.code).toBe(SearchErrorCode.SEARCH_UNAVAILABLE);
+        expect(e.getStatus()).toBe(503);
+      }
+    });
+
+    it('findLatestJob() rethrows ES ConnectionError as SearchException (503 SEARCH_UNAVAILABLE)', async () => {
+      esClient.search.mockRejectedValueOnce(connectionError);
+
+      await expect(repository.findLatestJob()).rejects.toThrow(SearchException);
+
+      esClient.search.mockRejectedValueOnce(connectionError);
+      try {
+        await repository.findLatestJob();
+        fail('expected to throw');
+      } catch (err: unknown) {
+        const e = err as SearchException;
+        expect(e.code).toBe(SearchErrorCode.SEARCH_UNAVAILABLE);
+        expect(e.getStatus()).toBe(503);
+      }
+    });
+
+    it('findActiveJob() rethrows ES ConnectionError as SearchException (503 SEARCH_UNAVAILABLE)', async () => {
+      esClient.search.mockRejectedValueOnce(connectionError);
+
+      await expect(repository.findActiveJob()).rejects.toThrow(SearchException);
+
+      esClient.search.mockRejectedValueOnce(connectionError);
+      try {
+        await repository.findActiveJob();
+        fail('expected to throw');
+      } catch (err: unknown) {
+        const e = err as SearchException;
+        expect(e.code).toBe(SearchErrorCode.SEARCH_UNAVAILABLE);
+        expect(e.getStatus()).toBe(503);
+      }
+    });
+
+    it('hasActiveJob() rethrows ES ConnectionError as SearchException (503 SEARCH_UNAVAILABLE)', async () => {
+      esClient.search.mockRejectedValueOnce(connectionError);
+
+      await expect(repository.hasActiveJob()).rejects.toThrow(SearchException);
+
+      esClient.search.mockRejectedValueOnce(connectionError);
+      try {
+        await repository.hasActiveJob();
+        fail('expected to throw');
+      } catch (err: unknown) {
+        const e = err as SearchException;
+        expect(e.code).toBe(SearchErrorCode.SEARCH_UNAVAILABLE);
+        expect(e.getStatus()).toBe(503);
+      }
+    });
+
+    it('releaseLock() rethrows ES ConnectionError as SearchException (503 SEARCH_UNAVAILABLE)', async () => {
+      esClient.get.mockRejectedValueOnce(connectionError);
+
+      await expect(repository.releaseLock('job-1')).rejects.toThrow(
+        SearchException,
+      );
+
+      esClient.get.mockRejectedValueOnce(connectionError);
+      try {
+        await repository.releaseLock('job-1');
+        fail('expected to throw');
+      } catch (err: unknown) {
+        const e = err as SearchException;
+        expect(e.code).toBe(SearchErrorCode.SEARCH_UNAVAILABLE);
+        expect(e.getStatus()).toBe(503);
+      }
+    });
+
+    it('latest() and findLatestJob() return null on 404 index_not_found', async () => {
+      esClient.search.mockRejectedValueOnce(indexNotFoundError);
+      const res1 = await repository.latest();
+      expect(res1).toBeNull();
+
+      esClient.search.mockRejectedValueOnce(indexNotFoundError);
+      const res2 = await repository.findLatestJob();
+      expect(res2).toBeNull();
+    });
+
+    it('findActiveJob() returns null on 404 index_not_found', async () => {
+      esClient.search.mockRejectedValueOnce(indexNotFoundError);
+      const res = await repository.findActiveJob();
+      expect(res).toBeNull();
+    });
+
+    it('hasActiveJob() returns false on 404 index_not_found', async () => {
+      esClient.search.mockRejectedValueOnce(indexNotFoundError);
+      const res = await repository.hasActiveJob();
+      expect(res).toBe(false);
+    });
+  });
 });

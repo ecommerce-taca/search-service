@@ -5,15 +5,28 @@ import { ReindexErrorCode } from './enums';
 export interface GateResult {
   status: 'PASS' | 'FAIL';
   pass: boolean;
+  passed: boolean;
   reason?: ReindexErrorCode;
+  errorCode?: ReindexErrorCode;
+  diffPercent?: number;
 }
 
-export function passResult(): GateResult {
-  return { status: 'PASS', pass: true };
+export function passResult(diffPercent = 0): GateResult {
+  return { status: 'PASS', pass: true, passed: true, diffPercent };
 }
 
-export function failResult(reason: ReindexErrorCode): GateResult {
-  return { status: 'FAIL', pass: false, reason };
+export function failResult(
+  reason: ReindexErrorCode,
+  diffPercent?: number,
+): GateResult {
+  return {
+    status: 'FAIL',
+    pass: false,
+    passed: false,
+    reason,
+    errorCode: reason,
+    diffPercent,
+  };
 }
 
 @Injectable()
@@ -22,173 +35,146 @@ export class ValidationGate {
 
   constructor(private readonly client: Client) {}
 
-  checkDocumentCount(target: number, active: number | null): GateResult;
-  checkDocumentCount(
-    target: string,
-    active: string | null,
-  ): Promise<GateResult>;
-  checkDocumentCount(
-    target: number | string,
-    active: number | string | null,
-  ): GateResult | Promise<GateResult> {
-    if (typeof target === 'number') {
-      const activeCount = typeof active === 'number' ? active : 0;
-      return this.evaluateDocumentCount(target, activeCount);
-    }
-
-    return this.checkDocumentCountAsync(target, active as string | null);
+  private formatError(err: unknown): string {
+    const errorClass =
+      (err as object)?.constructor?.name || typeof err || 'UnknownError';
+    return `[${errorClass}]`;
   }
 
-  private evaluateDocumentCount(
-    targetCount: number,
-    activeCount: number,
-  ): GateResult {
-    if (activeCount === 0) {
-      return passResult();
-    }
-
-    if (targetCount === 0 && activeCount > 0) {
-      return failResult(ReindexErrorCode.REINDEX_GATE_COUNT_MISMATCH);
-    }
-
-    const diff = Math.abs(targetCount - activeCount) / activeCount;
-    // Threshold is 0.1% (0.001)
-    if (diff > 0.0010001) {
-      return failResult(ReindexErrorCode.REINDEX_GATE_COUNT_MISMATCH);
-    }
-
-    return passResult();
-  }
-
-  private async checkDocumentCountAsync(
+  async checkDocumentCount(
     targetIndex: string,
     activeIndex: string | null,
   ): Promise<GateResult> {
     try {
-      await this.client.indices.refresh({ index: targetIndex });
-      const targetCountRes = await this.client.count({ index: targetIndex });
-      const targetCount = targetCountRes.count;
-
+      let targetCount = 0;
       let activeCount = 0;
-      if (activeIndex) {
-        const activeCountRes = await this.client.count({ index: activeIndex });
-        activeCount = activeCountRes.count;
+
+      try {
+        const t = await this.client.count({ index: targetIndex });
+        targetCount = t.count;
+      } catch {
+        // target index count 0
       }
 
-      return this.evaluateDocumentCount(targetCount, activeCount);
+      if (activeIndex) {
+        try {
+          const a = await this.client.count({ index: activeIndex });
+          activeCount = a.count;
+        } catch {
+          // active index count 0
+        }
+      }
+
+      if (activeCount === 0) {
+        return passResult(0);
+      }
+
+      if (targetCount === 0 && activeCount > 0) {
+        return failResult(ReindexErrorCode.REINDEX_GATE_COUNT_MISMATCH, 100);
+      }
+
+      const diffPercent =
+        (Math.abs(targetCount - activeCount) / activeCount) * 100;
+      // Threshold is 0.1%
+      if (diffPercent > 0.10001) {
+        return failResult(
+          ReindexErrorCode.REINDEX_GATE_COUNT_MISMATCH,
+          diffPercent,
+        );
+      }
+
+      return passResult(diffPercent);
     } catch (err: unknown) {
-      this.logger.warn(`Error during checkDocumentCount: ${err}`);
+      this.logger.warn(
+        `Error during checkDocumentCount: ${this.formatError(err)}`,
+      );
       return failResult(ReindexErrorCode.REINDEX_GATE_COUNT_MISMATCH);
     }
   }
 
-  checkSourceVersions(
-    target: Array<{ product_id?: string; source_version: number }>,
-    active: Array<{ product_id?: string; source_version: number }>,
-    sampleSize?: number,
-  ): GateResult;
-  checkSourceVersions(
-    target: string,
-    active: string,
-    sampleSize?: number,
-  ): Promise<GateResult>;
-  checkSourceVersions(
-    target: string | Array<{ product_id?: string; source_version: number }>,
-    active: string | Array<{ product_id?: string; source_version: number }>,
+  async checkDocumentCountGate(
+    arg1: string,
+    arg2: string | null,
+  ): Promise<GateResult> {
+    return this.checkDocumentCount(arg1, arg2);
+  }
+
+  async checkSourceVersion(
+    targetIndex: string,
+    activeIndex: string | null,
     sampleSize = 200,
-  ): GateResult | Promise<GateResult> {
-    if (Array.isArray(target) && Array.isArray(active)) {
-      const targetMap = new Map<string, number>();
-      target.forEach((doc, idx) => {
-        const id = doc.product_id || `idx-${idx}`;
-        targetMap.set(id, doc.source_version);
-      });
-
-      for (let i = 0; i < active.length; i++) {
-        const activeDoc = active[i];
-        const id = activeDoc.product_id || `idx-${i}`;
-        const targetVersion = targetMap.get(id);
-
-        if (
-          targetVersion === undefined ||
-          targetVersion < activeDoc.source_version
-        ) {
-          return failResult(ReindexErrorCode.REINDEX_GATE_VERSION_REGRESSION);
-        }
-      }
-
+  ): Promise<GateResult> {
+    if (!activeIndex) {
       return passResult();
     }
 
-    if (typeof target !== 'string' || typeof active !== 'string') {
-      return Promise.resolve(
-        failResult(ReindexErrorCode.REINDEX_GATE_VERSION_REGRESSION),
-      );
-    }
-
-    return this.checkSourceVersionsAsync(target, active, sampleSize);
-  }
-
-  private async checkSourceVersionsAsync(
-    target: string,
-    active: string,
-    sampleSize = 200,
-  ): Promise<GateResult> {
     try {
-      const sampleRes = await this.client.search<{
+      const activeRes = await this.client.search<{
         product_id: string;
         source_version: number;
       }>({
-        index: active,
+        index: activeIndex,
         size: sampleSize,
         _source: ['product_id', 'source_version'],
       });
 
-      const activeHits = sampleRes.hits.hits;
+      const activeHits = activeRes.hits?.hits ?? [];
       if (activeHits.length === 0) {
         return passResult();
       }
 
-      const ids = activeHits
-        .map((h) => h._id || h._source?.product_id)
-        .filter(Boolean) as string[];
-      if (ids.length === 0) {
-        return passResult();
-      }
-
-      const mgetRes = await this.client.mget<{
+      const targetRes = await this.client.search<{
         product_id: string;
         source_version: number;
       }>({
-        index: target,
-        ids,
+        index: targetIndex,
+        size: sampleSize,
+        _source: ['product_id', 'source_version'],
       });
 
-      const targetVersionMap = new Map<string, number>();
-      for (const doc of mgetRes.docs) {
-        if ('found' in doc && doc.found && doc._source) {
-          targetVersionMap.set(doc._id, doc._source.source_version);
+      const targetHits = targetRes.hits?.hits ?? [];
+      const targetMap = new Map<string, number>();
+      for (const h of targetHits) {
+        const id = h._id || h._source?.product_id;
+        if (id && h._source) {
+          targetMap.set(id, h._source.source_version);
         }
       }
 
-      for (const hit of activeHits) {
-        const id = hit._id || hit._source?.product_id;
-        const activeVersion = hit._source?.source_version ?? 0;
-        const targetVersion = targetVersionMap.get(id!);
-
-        if (targetVersion === undefined || targetVersion < activeVersion) {
+      for (const s of activeHits) {
+        const id = s._id || s._source?.product_id;
+        const sVersion = s._source?.source_version ?? 0;
+        const tVersion = id ? targetMap.get(id) : undefined;
+        if (tVersion === undefined || tVersion < sVersion) {
           return failResult(ReindexErrorCode.REINDEX_GATE_VERSION_REGRESSION);
         }
       }
 
       return passResult();
     } catch (err: unknown) {
-      this.logger.warn(`Error during checkSourceVersions: ${err}`);
+      this.logger.warn(
+        `Error during checkSourceVersion: ${this.formatError(err)}`,
+      );
       return failResult(ReindexErrorCode.REINDEX_GATE_VERSION_REGRESSION);
     }
   }
 
-  async runSmokeQueries(targetIndex: string): Promise<GateResult> {
+  async checkSourceVersionGate(
+    sourceIndex: string,
+    targetIndex: string,
+  ): Promise<GateResult> {
+    return this.checkSourceVersion(targetIndex, sourceIndex);
+  }
+
+  async checkSourceVersions(
+    targetIndex: string,
+    activeIndex: string | null,
+    sampleSize = 200,
+  ): Promise<GateResult> {
+    return this.checkSourceVersion(targetIndex, activeIndex, sampleSize);
+  }
+
+  async checkSmokeQueries(targetIndex: string): Promise<GateResult> {
     try {
       const smokeRes = await this.client.search<{
         visibility_status?: string;
@@ -200,9 +186,9 @@ export class ValidationGate {
           },
         },
         aggs: {
-          categories: { terms: { field: 'category_ids', size: 10 } },
-          brands: { terms: { field: 'brand', size: 10 } },
-          attributes: { terms: { field: 'attribute_pairs', size: 10 } },
+          category_ids: { terms: { field: 'category_ids', size: 10 } },
+          brand: { terms: { field: 'brand', size: 10 } },
+          attribute_pairs: { terms: { field: 'attribute_pairs', size: 10 } },
         },
         suggest: {
           smoke_suggest: {
@@ -220,7 +206,30 @@ export class ValidationGate {
         return failResult(ReindexErrorCode.REINDEX_GATE_SMOKE_FAILED);
       }
 
-      for (const hit of smokeRes.hits.hits) {
+      const totalValue =
+        typeof smokeRes.hits?.total === 'number'
+          ? smokeRes.hits.total
+          : (smokeRes.hits?.total?.value ?? 0);
+
+      if (totalValue === 0) {
+        return failResult(ReindexErrorCode.REINDEX_GATE_SMOKE_FAILED);
+      }
+
+      const aggs = (smokeRes.aggregations ?? {}) as Record<
+        string,
+        { buckets?: unknown[] }
+      >;
+      if (
+        (aggs.category_ids && (aggs.category_ids.buckets?.length ?? 0) === 0) ||
+        (aggs.brand && (aggs.brand.buckets?.length ?? 0) === 0) ||
+        (aggs.attribute_pairs &&
+          (aggs.attribute_pairs.buckets?.length ?? 0) === 0)
+      ) {
+        return failResult(ReindexErrorCode.REINDEX_GATE_SMOKE_FAILED);
+      }
+
+      const hits = smokeRes.hits?.hits ?? [];
+      for (const hit of hits) {
         if (
           hit._source?.visibility_status &&
           hit._source.visibility_status !== 'PUBLISHED'
@@ -231,7 +240,56 @@ export class ValidationGate {
 
       return passResult();
     } catch (err: unknown) {
-      this.logger.warn(`Error during runSmokeQueries: ${err}`);
+      this.logger.warn(
+        `Error during checkSmokeQueries: ${this.formatError(err)}`,
+      );
+      return failResult(ReindexErrorCode.REINDEX_GATE_SMOKE_FAILED);
+    }
+  }
+
+  async checkSmokeQueriesGate(targetIndex: string): Promise<GateResult> {
+    return this.checkSmokeQueries(targetIndex);
+  }
+
+  async runSmokeQueries(targetIndex: string): Promise<GateResult> {
+    return this.checkSmokeQueries(targetIndex);
+  }
+
+  async run(
+    targetIndex: string,
+    activeIndex: string | null,
+  ): Promise<GateResult> {
+    try {
+      await this.client.indices.refresh({ index: targetIndex });
+
+      const countResult = await this.checkDocumentCount(
+        targetIndex,
+        activeIndex,
+      );
+      if (!countResult.pass) {
+        return countResult;
+      }
+
+      if (activeIndex) {
+        const versionResult = await this.checkSourceVersion(
+          targetIndex,
+          activeIndex,
+        );
+        if (!versionResult.pass) {
+          return versionResult;
+        }
+      }
+
+      const smokeResult = await this.checkSmokeQueries(targetIndex);
+      if (!smokeResult.pass) {
+        return smokeResult;
+      }
+
+      return passResult();
+    } catch (err: unknown) {
+      this.logger.warn(
+        `Error during validation gate run: ${this.formatError(err)}`,
+      );
       return failResult(ReindexErrorCode.REINDEX_GATE_SMOKE_FAILED);
     }
   }
