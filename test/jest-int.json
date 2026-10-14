@@ -5,6 +5,7 @@
   "transform": {
     "^.+\\.(t|j)s$": "ts-jest"
   },
+  "setupFiles": ["<rootDir>/setup.ts"],
   "testEnvironment": "node",
   "testTimeout": 30000
 }

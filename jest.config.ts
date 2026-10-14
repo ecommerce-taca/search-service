@@ -5,6 +5,7 @@ export default {
   transform: {
     '^.+\\.(t|j)s$': 'ts-jest',
   },
+  setupFiles: ['<rootDir>/../test/setup.ts'],
   collectCoverageFrom: ['**/*.(t|j)s'],
   coverageDirectory: '../coverage',
   testEnvironment: 'node',
