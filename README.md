@@ -93,3 +93,18 @@ docker build -t ecommerce-search-service:latest .
 # Run container as non-root user
 docker run -p 3000:3000 --env-file .env ecommerce-search-service:latest
 ```
+
+## 7. Reindex & Manual Rollback Procedure (v1)
+
+Rollback is a manual operational procedure in v1. The previous index is retained in the cluster upon alias swap. To revert `products-read` back to the previous index atomically without downtime, execute a single `_aliases` request:
+
+```bash
+curl -X POST "http://${ES_NODE}/_aliases" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "actions": [
+      { "remove": { "index": "<current-active-index>", "alias": "products-read" } },
+      { "add":    { "index": "<previous-retained-index>", "alias": "products-read" } }
+    ]
+  }'
+```
