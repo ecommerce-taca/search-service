@@ -65,7 +65,7 @@ export class QueryParser {
       );
     }
 
-    this.validateUnknownFields(dto as unknown as Record<string, unknown>);
+    this.validateUnknownFields(dto);
 
     const text = this.parseText(dto.q);
     const categoryId = this.parseCategory(dto.category_id);
@@ -97,7 +97,7 @@ export class QueryParser {
     };
   }
 
-  private validateUnknownFields(dto: Record<string, unknown>): void {
+  private validateUnknownFields(dto: object): void {
     const unknownFields = Object.keys(dto).filter(
       (key) => !ALLOWED_QUERY_FIELDS.has(key),
     );

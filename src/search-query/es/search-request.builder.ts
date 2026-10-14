@@ -217,6 +217,7 @@ export class SearchRequestBuilder {
             range: {
               field: 'price',
               ranges: PRICE_BUCKETS.map((b) => ({
+                key: b.key,
                 ...(b.from !== undefined ? { from: b.from } : {}),
                 ...(b.to !== undefined ? { to: b.to } : {}),
               })),

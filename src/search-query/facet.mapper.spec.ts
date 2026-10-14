@@ -104,9 +104,9 @@ describe('FacetMapper', () => {
     it('D9: maps fixed price buckets by key, not by array index', () => {
       // Intentionally provide buckets out of order
       const rawBuckets = [
-        { key: '20000000.0-*', doc_count: 15 },
-        { key: '*-5000000.0', doc_count: 8 },
-        { key: '5000000.0-20000000.0', doc_count: 12 },
+        { key: 'gte_20m', doc_count: 15 },
+        { key: 'lt_5m', doc_count: 8 },
+        { key: '5m_20m', doc_count: 12 },
       ];
 
       const result = mapper.buildPriceFacet(rawBuckets);
@@ -119,7 +119,7 @@ describe('FacetMapper', () => {
     });
 
     it('defaults missing price buckets to count 0', () => {
-      const rawBuckets = [{ key: '*-5000000.0', doc_count: 3 }];
+      const rawBuckets = [{ key: 'lt_5m', doc_count: 3 }];
 
       const result = mapper.buildPriceFacet(rawBuckets);
 
@@ -237,7 +237,7 @@ describe('FacetMapper', () => {
         } as unknown as estypes.AggregationsAggregate,
         price: {
           values: {
-            buckets: [{ key: '*-5000000.0', doc_count: 3 }],
+            buckets: [{ key: 'lt_5m', doc_count: 3 }],
           },
         } as unknown as estypes.AggregationsAggregate,
       };

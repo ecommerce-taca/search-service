@@ -8,20 +8,20 @@ export interface PriceBucketDefinition {
 
 export const PRICE_BUCKETS: readonly PriceBucketDefinition[] = [
   {
-    key: '*-5000000.0',
+    key: 'lt_5m',
     min: 0,
     max: 5000000,
     to: 5000000,
   },
   {
-    key: '5000000.0-20000000.0',
+    key: '5m_20m',
     min: 5000000,
     max: 20000000,
     from: 5000000,
     to: 20000000,
   },
   {
-    key: '20000000.0-*',
+    key: 'gte_20m',
     min: 20000000,
     max: null,
     from: 20000000,

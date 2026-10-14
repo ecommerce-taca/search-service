@@ -138,14 +138,14 @@ describe('SearchQuery (e2e HTTP Contract Tests without cluster)', () => {
             price: {
               values: {
                 buckets: [
-                  { key: '*-5000000.0', to: 5000000, doc_count: 1 },
+                  { key: 'lt_5m', to: 5000000, doc_count: 1 },
                   {
-                    key: '5000000.0-20000000.0',
+                    key: '5m_20m',
                     from: 5000000,
                     to: 20000000,
                     doc_count: 0,
                   },
-                  { key: '20000000.0-*', from: 20000000, doc_count: 0 },
+                  { key: 'gte_20m', from: 20000000, doc_count: 0 },
                 ],
               },
             },

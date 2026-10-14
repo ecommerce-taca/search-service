@@ -183,7 +183,7 @@ describe('SearchRequestBuilder', () => {
         values?: {
           range?: {
             field: string;
-            ranges: Array<{ from?: number; to?: number }>;
+            ranges: Array<{ key?: string; from?: number; to?: number }>;
           };
         };
       };
@@ -192,9 +192,9 @@ describe('SearchRequestBuilder', () => {
     expect(priceAgg).toBeDefined();
     expect(priceAgg.aggs?.values?.range?.field).toBe('price');
     expect(priceAgg.aggs?.values?.range?.ranges).toEqual([
-      { to: 5000000 },
-      { from: 5000000, to: 20000000 },
-      { from: 20000000 },
+      { key: 'lt_5m', to: 5000000 },
+      { key: '5m_20m', from: 5000000, to: 20000000 },
+      { key: 'gte_20m', from: 20000000 },
     ]);
   });
 
