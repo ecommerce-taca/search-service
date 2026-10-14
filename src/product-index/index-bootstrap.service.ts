@@ -99,7 +99,27 @@ export class IndexBootstrapService implements OnApplicationBootstrap {
         }
       }
     }
+    await this.syncInternalMapping(name, mappings, settings);
     return false;
+  }
+
+  /**
+   * Internal indices (no settings) are never reindexed, so additive field
+   * changes must reach indices created by an older version of the mapping.
+   * putMapping is additive and idempotent; a conflicting change still fails.
+   */
+  private async syncInternalMapping(
+    name: string,
+    mappings: MappingTypeMapping,
+    settings?: IndicesIndexSettings,
+  ): Promise<void> {
+    if (settings || !mappings.properties) {
+      return;
+    }
+    await this.client.indices.putMapping({
+      index: name,
+      properties: mappings.properties,
+    });
   }
 
   async bootstrap(): Promise<BootstrapResult> {

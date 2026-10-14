@@ -10,6 +10,7 @@ export const REINDEX_JOBS_MAPPING_V1: MappingTypeMapping = {
     checkpoint: { type: 'keyword' },
     processed_count: { type: 'long' },
     failed_count: { type: 'long' },
+    total_estimate: { type: 'long' },
     started_at: { type: 'date' },
     finished_at: { type: 'date' },
     updated_at: { type: 'date' },
