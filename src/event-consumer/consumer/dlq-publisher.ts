@@ -58,7 +58,9 @@ export class DlqPublisher {
         this.logger.debug(`409 recording state for ${evt.event_id}`);
         return;
       }
-      this.logger.warn(`Failed recording state for ${evt.event_id}: ${err}`);
+      this.logger.warn(
+        `Failed recording state for ${evt.event_id}: ${err instanceof Error ? err.name : 'UnknownError'}`,
+      );
     }
   }
 
@@ -117,7 +119,9 @@ export class DlqPublisher {
       });
       this.logger.log(`Produced redacted event ${evt.event_id} to ${dlqTopic}`);
     } catch (err: unknown) {
-      this.logger.error(`Failed producing to DLQ topic ${dlqTopic}: ${err}`);
+      this.logger.error(
+        `Failed producing to DLQ topic ${dlqTopic}: ${err instanceof Error ? err.name : 'UnknownError'}`,
+      );
       throw err;
     }
 
@@ -169,7 +173,7 @@ export class DlqPublisher {
       );
     } catch (err: unknown) {
       this.logger.error(
-        `Failed producing invalid event to ${dlqTopic}: ${err}`,
+        `Failed producing invalid event to ${dlqTopic}: ${err instanceof Error ? err.name : 'UnknownError'}`,
       );
       throw err;
     }

@@ -10,13 +10,6 @@ import { Gauge } from 'prom-client';
 import { getKafkaTopic, KAFKA_TOPICS } from '../../common/constants';
 import { AppConfigService } from '../../config/config.service';
 import { MetricsService } from '../../observability/metrics.service';
-import {
-  CatalogHandler,
-  CategoryHandler,
-  ProductHandler,
-  RatingHandler,
-  SkuHandler,
-} from '../handlers';
 import { KAFKA_CLIENT } from '../kafka.module';
 import { ConsumerStatusService } from '../status/consumer-status.service';
 import { DlqPublisher } from './dlq-publisher';
@@ -35,11 +28,6 @@ export class KafkaEventConsumer
     private readonly configService: AppConfigService,
     @Inject(KAFKA_CLIENT) private readonly kafka: Kafka,
     private readonly metricsService: MetricsService,
-    private readonly productHandler: ProductHandler,
-    private readonly skuHandler: SkuHandler,
-    private readonly categoryHandler: CategoryHandler,
-    private readonly catalogHandler: CatalogHandler,
-    private readonly ratingHandler: RatingHandler,
     private readonly consumerStatusService: ConsumerStatusService,
     private readonly eventProcessor: EventProcessor,
     private readonly dlqPublisher: DlqPublisher,
@@ -83,13 +71,17 @@ export class KafkaEventConsumer
       try {
         await this.consumer.disconnect();
       } catch (err: unknown) {
-        this.logger.error(`Error disconnecting Kafka consumer: ${err}`);
+        this.logger.error(
+          `Error disconnecting Kafka consumer: ${err instanceof Error ? err.name : 'UnknownError'}`,
+        );
       }
     }
     try {
       await this.dlqPublisher.disconnect();
     } catch (err: unknown) {
-      this.logger.error(`Error disconnecting DLQ publisher: ${err}`);
+      this.logger.error(
+        `Error disconnecting DLQ publisher: ${err instanceof Error ? err.name : 'UnknownError'}`,
+      );
     }
   }
 

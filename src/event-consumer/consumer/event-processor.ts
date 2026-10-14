@@ -14,8 +14,6 @@ import {
   RequestContext,
   RequestContextData,
 } from '../../common/context/request-context';
-import { SearchErrorCode } from '../../common/errors/error-codes';
-import { SearchException } from '../../common/errors/search.exception';
 import { AppConfigService } from '../../config/config.service';
 import { MetricsService } from '../../observability/metrics.service';
 import { ELASTICSEARCH_CLIENT } from '../../product-index/elasticsearch.module';
@@ -92,7 +90,9 @@ export class EventProcessor {
         evt = JSON.parse(raw) as DomainEvent<unknown>;
         if (!evt || typeof evt !== 'object') throw new Error('Invalid JSON');
       } catch (parseErr) {
-        return sendInvalid(`Failed parsing JSON on ${topic}: ${parseErr}`);
+        return sendInvalid(
+          `Failed parsing JSON on ${topic}: ${parseErr instanceof Error ? parseErr.name : 'UnknownError'}`,
+        );
       }
 
       if (!evt.event_id) {
@@ -129,7 +129,9 @@ export class EventProcessor {
       }
     } catch (err: unknown) {
       if (!(err instanceof errors.ResponseError && err.statusCode === 404)) {
-        this.logger.warn(`Dedupe check failed for ${evt.event_id}: ${err}`);
+        this.logger.warn(
+          `Dedupe check failed for ${evt.event_id}: ${err instanceof Error ? err.name : 'UnknownError'}`,
+        );
       }
     }
     return 'PROCESSED';
@@ -139,20 +141,18 @@ export class EventProcessor {
     topic: string,
     evt: DomainEvent<unknown>,
     ctx: RequestContextData,
-    handler?: (e: DomainEvent<unknown>) => Promise<{ status: string } | void>,
   ): Promise<void> {
     let lastError: unknown = null;
     let success = false;
     for (let attempt = 1; attempt <= EVENT_RETRY_COUNT; attempt++) {
       try {
-        if (handler) await handler(evt);
-        else await this.dispatchToHandler(topic, evt);
+        await this.dispatchToHandler(topic, evt);
         success = true;
         break;
       } catch (err) {
         lastError = err;
         this.logger.warn(
-          `Attempt ${attempt}/${EVENT_RETRY_COUNT} failed for ${evt.event_id}: ${err}`,
+          `Attempt ${attempt}/${EVENT_RETRY_COUNT} failed for ${evt.event_id}: ${err instanceof Error ? err.name : 'UnknownError'}`,
         );
         if (attempt < EVENT_RETRY_COUNT) {
           const ms =
@@ -169,52 +169,6 @@ export class EventProcessor {
       this.eventsProcessedTotal.labels(topic, 'failed').inc();
       await this.dlqPublisher.publish(topic, evt, lastError, ctx);
     }
-  }
-
-  async processEvent(
-    evt: DomainEvent<unknown> | { event_id: string; [key: string]: unknown },
-    headers?: Record<string, unknown>,
-  ): Promise<{ status: string; reason?: string }> {
-    void headers;
-    if (!evt?.event_id)
-      return { status: 'SKIPPED', reason: 'MISSING_EVENT_ID' };
-    const res = await this.checkDeduplication(evt);
-    return res === 'DUPLICATE'
-      ? { status: 'SKIPPED', reason: 'DUPLICATE' }
-      : { status: 'PROCESSED' };
-  }
-
-  async processWithRetry(
-    evt: DomainEvent<unknown> | { event_id: string; [key: string]: unknown },
-    headers?: Record<string, unknown>,
-    handler?: (evt: DomainEvent<unknown>) => Promise<{ status: string } | void>,
-  ): Promise<{ status: string }> {
-    const ctx = this.buildContext(headers);
-    return RequestContext.run(ctx, async () => {
-      const topic = getKafkaTopic(
-        KAFKA_TOPICS.PRODUCT_EVENTS,
-        this.configService.kafkaTopicPrefix,
-      );
-      try {
-        await this.executeWithRetry(
-          topic,
-          evt as DomainEvent<unknown>,
-          ctx,
-          handler,
-        );
-        return { status: 'PROCESSED' };
-      } catch (err: unknown) {
-        const code =
-          (err instanceof SearchException
-            ? err.code
-            : (err as { code?: string })?.code) ||
-          SearchErrorCode.SEARCH_INTERNAL_ERROR;
-        this.logger.error(
-          `Failed processing ${evt.event_id} with error_code ${code}: ${err}`,
-        );
-        return { status: 'FAILED' };
-      }
-    });
   }
 
   private async dispatchToHandler(topic: string, evt: DomainEvent<unknown>) {

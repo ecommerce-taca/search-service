@@ -461,25 +461,35 @@ describe('KafkaEventConsumer & EventProcessor', () => {
         _id: 'evt-duplicate-1',
       });
 
-      const event = {
-        event_id: 'evt-duplicate-1',
-        schema_version: 1,
-        event_type: 'product.updated',
-        occurred_at: '2026-10-14T10:00:00Z',
-        aggregate_type: 'PRODUCT',
-        aggregate_id: 'prod-1',
-        version: 5,
-        payload: { product_id: 'prod-1' },
+      const message = {
+        offset: '10',
+        value: Buffer.from(
+          JSON.stringify({
+            event_id: 'evt-duplicate-1',
+            schema_version: 1,
+            event_type: 'product.updated',
+            occurred_at: '2026-10-14T10:00:00Z',
+            aggregate_type: 'PRODUCT',
+            aggregate_id: 'prod-1',
+            version: 5,
+            payload: { product_id: 'prod-1' },
+          }),
+        ),
       };
 
-      const result = await eventProcessor.processEvent(event, {});
+      const result = await eventProcessor.processMessage(
+        'test-product.events.v1',
+        message,
+        0,
+      );
 
-      expect(result).toEqual(
+      expect(mockClient.get).toHaveBeenCalledWith(
         expect.objectContaining({
-          status: 'SKIPPED',
-          reason: expect.stringMatching(/DUPLICATE|ALREADY_PROCESSED/),
+          id: 'evt-duplicate-1',
         }),
       );
+      expect(mockProductHandler.handle).not.toHaveBeenCalled();
+      expect(result).toBe('2026-10-14T10:00:00.000Z');
     });
   });
 
@@ -488,38 +498,52 @@ describe('KafkaEventConsumer & EventProcessor', () => {
       expect(EVENT_RETRY_COUNT).toBe(3);
       expect(EVENT_RETRY_BACKOFF_MS).toBe(2000);
 
-      const failingHandler = jest
+      mockProductHandler.handle = jest
         .fn()
         .mockRejectedValueOnce(new Error('Transient error 1'))
         .mockRejectedValueOnce(new Error('Transient error 2'))
-        .mockResolvedValueOnce({ status: 'PROCESSED' });
+        .mockResolvedValueOnce(undefined);
 
-      const event = {
-        event_id: 'evt-retry-1',
-        schema_version: 1,
-        event_type: 'product.created',
-        occurred_at: '2026-10-14T10:00:00Z',
-        aggregate_type: 'PRODUCT',
-        aggregate_id: 'prod-1',
-        version: 1,
-        payload: { product_id: 'prod-1' },
+      const message = {
+        offset: '20',
+        value: Buffer.from(
+          JSON.stringify({
+            event_id: 'evt-retry-1',
+            schema_version: 1,
+            event_type: 'product.created',
+            occurred_at: '2026-10-14T10:00:00Z',
+            aggregate_type: 'PRODUCT',
+            aggregate_id: 'prod-1',
+            version: 1,
+            payload: { product_id: 'prod-1' },
+          }),
+        ),
       };
 
-      const outcome = await eventProcessor.processWithRetry(
-        event,
-        {},
-        failingHandler,
+      const outcome = await eventProcessor.processMessage(
+        'test-product.events.v1',
+        message,
+        0,
       );
 
-      expect(failingHandler).toHaveBeenCalledTimes(3);
-      expect(outcome.status).toBe('PROCESSED');
+      expect(mockProductHandler.handle).toHaveBeenCalledTimes(3);
+      expect(outcome).toBe('2026-10-14T10:00:00.000Z');
+      expect(mockClient.index).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'evt-retry-1',
+          document: expect.objectContaining({
+            event_id: 'evt-retry-1',
+            status: 'PROCESSED',
+          }),
+        }),
+      );
     });
   });
 
   describe('[IDX-CSM-05] DLQ routing with redacted payload', () => {
     it('[IDX-CSM-05] should route to DLQ topic after 3 failed attempts with payload redacted', async () => {
       const permanentError = new Error('Permanent processing error');
-      const failingHandler = jest.fn().mockRejectedValue(permanentError);
+      mockProductHandler.handle = jest.fn().mockRejectedValue(permanentError);
 
       const event = {
         event_id: 'evt-poison-1',
@@ -542,8 +566,15 @@ describe('KafkaEventConsumer & EventProcessor', () => {
         'x-request-id': Buffer.from('req-12345'),
       };
 
-      await eventProcessor.processWithRetry(event, headers, failingHandler);
+      const message = {
+        offset: '30',
+        headers,
+        value: Buffer.from(JSON.stringify(event)),
+      };
 
+      await eventProcessor.processMessage('test-product.events.v1', message, 0);
+
+      expect(mockProductHandler.handle).toHaveBeenCalledTimes(3);
       expect(mockProducer.send).toHaveBeenCalled();
       const sendArgs = (mockProducer.send as jest.Mock).mock.calls[0][0];
 
@@ -585,14 +616,20 @@ describe('KafkaEventConsumer & EventProcessor', () => {
       };
 
       let capturedTraceId: string | undefined;
-      const handler = jest.fn().mockImplementation(() => {
+      mockProductHandler.handle = jest.fn().mockImplementation(() => {
         capturedTraceId = RequestContext.getTraceId();
-        return Promise.resolve({ status: 'PROCESSED' });
+        return Promise.resolve(undefined);
       });
 
-      await eventProcessor.processWithRetry(event, headers, handler);
+      const message = {
+        offset: '40',
+        headers,
+        value: Buffer.from(JSON.stringify(event)),
+      };
 
-      expect(handler).toHaveBeenCalled();
+      await eventProcessor.processMessage('test-product.events.v1', message, 0);
+
+      expect(mockProductHandler.handle).toHaveBeenCalled();
       expect(capturedTraceId).toBe('4bf92f3577b34da6a3ce929d0e0e4736');
     });
   });
