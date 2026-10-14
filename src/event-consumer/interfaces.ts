@@ -4,7 +4,7 @@ export interface DomainEvent<T = unknown> {
   event_id: string;
   schema_version: number;
   event_type: string;
-  occurred_at: string;
+  occurred_at: string | number;
   aggregate_type: string;
   aggregate_id: string;
   version: number;

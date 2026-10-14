@@ -144,7 +144,7 @@ export class RatingHandler {
         doc: {
           rating_avg: ratingAvg,
           rating_count: ratingCount,
-          indexed_at: evt.occurred_at || new Date().toISOString(),
+          indexed_at: String(evt.occurred_at || new Date().toISOString()),
         },
       },
     ]);

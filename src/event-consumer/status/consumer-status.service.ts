@@ -51,7 +51,7 @@ export class ConsumerStatusService implements IConsumerStatusProvider {
       this.configService = configServiceOrClient as AppConfigService;
       this.kafka = kafkaOrConfigService as Kafka;
     }
-    this.isRunning = this.configService?.kafkaConsumerEnabled !== false;
+    this.isRunning = this.configService.kafkaConsumerEnabled !== false;
   }
 
   setConsumerState(running: boolean): void {
@@ -102,7 +102,7 @@ export class ConsumerStatusService implements IConsumerStatusProvider {
     }
 
     let state: ConsumerState;
-    const consumerEnabled = this.configService?.kafkaConsumerEnabled !== false;
+    const consumerEnabled = this.configService.kafkaConsumerEnabled !== false;
     if (!consumerEnabled || !this.isRunning) {
       state = ConsumerState.PAUSED;
     } else if (dlqCount > 0) {
@@ -170,7 +170,7 @@ export class ConsumerStatusService implements IConsumerStatusProvider {
       result[prefixed] = this.liveLagByTopic[prefixed] ?? 0;
     }
 
-    if (!this.kafka || this.configService?.kafkaConsumerEnabled === false) {
+    if (!this.kafka || this.configService.kafkaConsumerEnabled === false) {
       return result;
     }
 

@@ -94,7 +94,7 @@ export class ProductDocumentBuilder implements IProductDocumentBuilder {
             visibility_status: VisibilityStatus.HIDDEN,
             source_version: evt.version,
             source_event_id: evt.event_id,
-            indexed_at: evt.occurred_at || new Date().toISOString(),
+            indexed_at: String(evt.occurred_at || new Date().toISOString()),
           },
           sourceVersion: evt.version,
           sourceEventId: evt.event_id,
@@ -108,7 +108,7 @@ export class ProductDocumentBuilder implements IProductDocumentBuilder {
             visibility_status: VisibilityStatus.DELETED,
             source_version: evt.version,
             source_event_id: evt.event_id,
-            indexed_at: evt.occurred_at || new Date().toISOString(),
+            indexed_at: String(evt.occurred_at || new Date().toISOString()),
           },
           sourceVersion: evt.version,
           sourceEventId: evt.event_id,
@@ -122,7 +122,7 @@ export class ProductDocumentBuilder implements IProductDocumentBuilder {
             visibility_status: VisibilityStatus.HIDDEN,
             source_version: evt.version,
             source_event_id: evt.event_id,
-            indexed_at: evt.occurred_at || new Date().toISOString(),
+            indexed_at: String(evt.occurred_at || new Date().toISOString()),
           },
           sourceVersion: evt.version,
           sourceEventId: evt.event_id,
@@ -142,7 +142,7 @@ export class ProductDocumentBuilder implements IProductDocumentBuilder {
             visibility_status: nextVisibility,
             source_version: evt.version,
             source_event_id: evt.event_id,
-            indexed_at: evt.occurred_at || new Date().toISOString(),
+            indexed_at: String(evt.occurred_at || new Date().toISOString()),
           },
           sourceVersion: evt.version,
           sourceEventId: evt.event_id,
@@ -241,9 +241,11 @@ export class ProductDocumentBuilder implements IProductDocumentBuilder {
       visibility_status: VisibilityStatus.HIDDEN,
       source_version: evt.version,
       source_event_id: evt.event_id,
-      indexed_at: evt.occurred_at || new Date().toISOString(),
+      indexed_at: String(evt.occurred_at || new Date().toISOString()),
       created_at:
-        payload.created_at || evt.occurred_at || new Date().toISOString(),
+        payload.created_at ||
+        (evt.occurred_at ? String(evt.occurred_at) : undefined) ||
+        new Date().toISOString(),
       cover_url: payload.media?.[0]?.url || payload.cover_url,
       shop:
         payload.shop ||
@@ -267,7 +269,7 @@ export class ProductDocumentBuilder implements IProductDocumentBuilder {
     const doc: Partial<ProductSearchDocument> = {
       source_version: evt.version,
       source_event_id: evt.event_id,
-      indexed_at: evt.occurred_at || new Date().toISOString(),
+      indexed_at: String(evt.occurred_at || new Date().toISOString()),
     };
 
     if (payload.title !== undefined) {
@@ -368,7 +370,7 @@ export class ProductDocumentBuilder implements IProductDocumentBuilder {
       current?.created_at ||
       payload.created_at ||
       payload.published_at ||
-      evt.occurred_at ||
+      (evt.occurred_at ? String(evt.occurred_at) : undefined) ||
       new Date().toISOString();
 
     const visibilityStatus =
@@ -401,7 +403,7 @@ export class ProductDocumentBuilder implements IProductDocumentBuilder {
       visibility_status: visibilityStatus,
       source_version: evt.version,
       source_event_id: evt.event_id,
-      indexed_at: evt.occurred_at || new Date().toISOString(),
+      indexed_at: String(evt.occurred_at || new Date().toISOString()),
       created_at: createdAt,
       cover_url: coverUrl,
       shop,

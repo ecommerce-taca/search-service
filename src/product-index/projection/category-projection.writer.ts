@@ -137,9 +137,9 @@ export class CategoryProjectionWriter {
       source_version: evt.version,
       updated_at:
         'occurred_at' in evt && evt.occurred_at
-          ? evt.occurred_at
+          ? String(evt.occurred_at)
           : 'updated_at' in evt && evt.updated_at
-            ? evt.updated_at
+            ? String(evt.updated_at)
             : new Date().toISOString(),
     };
 
@@ -152,12 +152,7 @@ export class CategoryProjectionWriter {
         document: projectionDoc,
       });
     } catch (err: unknown) {
-      if (
-        (err instanceof errors.ResponseError ||
-          (err as { name?: string })?.name === 'ResponseError') &&
-        ((err as { statusCode?: number })?.statusCode === 409 ||
-          (err as { meta?: { statusCode?: number } })?.meta?.statusCode === 409)
-      ) {
+      if (err instanceof errors.ResponseError && err.statusCode === 409) {
         this.logger.debug(
           `Version conflict on category projection for ${categoryId}, skipping.`,
         );

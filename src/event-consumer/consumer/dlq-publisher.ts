@@ -1,4 +1,4 @@
-import { Client } from '@elastic/elasticsearch';
+import { Client, errors } from '@elastic/elasticsearch';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Kafka, Producer } from 'kafkajs';
 import {
@@ -26,24 +26,45 @@ export class DlqPublisher {
   ) {}
 
   async connect(): Promise<void> {
-    if (!this.producer) {
-      this.producer = this.kafka.producer();
-    }
+    if (!this.producer) this.producer = this.kafka.producer();
     await this.producer.connect();
   }
 
   async disconnect(): Promise<void> {
-    if (this.producer) {
-      await this.producer.disconnect();
+    if (this.producer) await this.producer.disconnect();
+  }
+
+  async recordConsumerState(
+    evt: DomainEvent<unknown>,
+    status: string,
+    errorCode: string | null = null,
+  ): Promise<void> {
+    const index = getConsumerStateIndex(this.configService.esIndexPrefix);
+    try {
+      await this.esClient.index({
+        index,
+        id: evt.event_id,
+        document: {
+          event_id: evt.event_id,
+          aggregate_id: evt.aggregate_id || '',
+          source_version: evt.version ?? 0,
+          processed_at: new Date().toISOString(),
+          status,
+          error_code: errorCode,
+        },
+      });
+    } catch (err: unknown) {
+      if (err instanceof errors.ResponseError && err.statusCode === 409) {
+        this.logger.debug(`409 recording state for ${evt.event_id}`);
+        return;
+      }
+      this.logger.warn(`Failed recording state for ${evt.event_id}: ${err}`);
     }
   }
 
   /**
-   * Publishes a redacted dead letter message to the DLQ topic and records
-   * the FAILED state in consumer-state.
-   *
-   * If DLQ write fails, the error is NOT swallowed: it is rethrown so the consumer
-   * will not commit the message offset and KafkaJS will re-deliver the batch.
+   * Publishes redacted dead letter message to DLQ and records DLQ state in consumer-state.
+   * Rethrows on publish failure so consumer does not commit offset.
    */
   async publish(
     topic: string,
@@ -62,31 +83,6 @@ export class DlqPublisher {
           ? ((error as Record<string, unknown>).code as string)
           : SearchErrorCode.SEARCH_INTERNAL_ERROR;
 
-    const consumerStateIndex = getConsumerStateIndex(
-      this.configService?.esIndexPrefix || '',
-    );
-
-    // Update state to FAILED
-    try {
-      await this.esClient.index({
-        index: consumerStateIndex,
-        id: evt.event_id,
-        document: {
-          event_id: evt.event_id,
-          aggregate_id: evt.aggregate_id || '',
-          source_version: evt.version ?? 0,
-          processed_at: new Date().toISOString(),
-          status: 'FAILED',
-          error_code: String(errorCode),
-        },
-      });
-    } catch (err: unknown) {
-      // Justified: recording failed status in consumer-state is best-effort before sending to DLQ
-      this.logger.error(
-        `Failed to record FAILED state for ${evt.event_id}: ${err}`,
-      );
-    }
-
     if (!this.producer) {
       this.producer = this.kafka.producer();
       await this.producer.connect();
@@ -94,7 +90,7 @@ export class DlqPublisher {
 
     const dlqTopic = getKafkaTopic(
       KAFKA_TOPICS.DLQ,
-      this.configService?.kafkaTopicPrefix || '',
+      this.configService.kafkaTopicPrefix,
     );
 
     const redactedEnvelope = {
@@ -119,12 +115,62 @@ export class DlqPublisher {
           },
         ],
       });
-      this.logger.log(
-        `Produced redacted event ${evt.event_id} to DLQ topic ${dlqTopic}`,
-      );
+      this.logger.log(`Produced redacted event ${evt.event_id} to ${dlqTopic}`);
     } catch (err: unknown) {
       this.logger.error(`Failed producing to DLQ topic ${dlqTopic}: ${err}`);
-      // Re-throw so kafkajs does not commit and re-delivers the batch from the last resolved offset
+      throw err;
+    }
+
+    await this.recordConsumerState(evt, 'DLQ', String(errorCode));
+  }
+
+  /**
+   * Publishes unparseable or missing event_id messages to DLQ without payload.
+   */
+  async publishInvalidMessage(
+    topic: string,
+    partition: number,
+    offset: string,
+    ctx: RequestContextData,
+  ): Promise<void> {
+    if (!this.producer) {
+      this.producer = this.kafka.producer();
+      await this.producer.connect();
+    }
+
+    const dlqTopic = getKafkaTopic(
+      KAFKA_TOPICS.DLQ,
+      this.configService.kafkaTopicPrefix,
+    );
+
+    const redactedEnvelope = {
+      topic,
+      partition,
+      offset,
+      error_code: 'INVALID_EVENT',
+    };
+
+    try {
+      await this.producer.send({
+        topic: dlqTopic,
+        messages: [
+          {
+            key: `${topic}-${partition}-${offset}`,
+            value: JSON.stringify(redactedEnvelope),
+            headers: {
+              ...(ctx.traceparent ? { traceparent: ctx.traceparent } : {}),
+              ...(ctx.requestId ? { 'x-request-id': ctx.requestId } : {}),
+            },
+          },
+        ],
+      });
+      this.logger.log(
+        `Produced invalid event (offset ${offset}) to ${dlqTopic}`,
+      );
+    } catch (err: unknown) {
+      this.logger.error(
+        `Failed producing invalid event to ${dlqTopic}: ${err}`,
+      );
       throw err;
     }
   }

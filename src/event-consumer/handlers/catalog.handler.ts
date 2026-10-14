@@ -68,7 +68,7 @@ export class CatalogHandler {
 
         const patch: Partial<ProductSearchDocument> = {
           category_ids: categoryIds,
-          indexed_at: evt.occurred_at || new Date().toISOString(),
+          indexed_at: String(evt.occurred_at || new Date().toISOString()),
         };
         if (Array.isArray(payload.category_path)) {
           patch.category_path = payload.category_path;
@@ -95,7 +95,7 @@ export class CatalogHandler {
             id: productId,
             doc: {
               cover_url: coverUrl,
-              indexed_at: evt.occurred_at || new Date().toISOString(),
+              indexed_at: String(evt.occurred_at || new Date().toISOString()),
             },
           },
         ]);
@@ -123,7 +123,7 @@ export class CatalogHandler {
             id: productId,
             doc: {
               shop,
-              indexed_at: evt.occurred_at || new Date().toISOString(),
+              indexed_at: String(evt.occurred_at || new Date().toISOString()),
             },
           },
         ]);
