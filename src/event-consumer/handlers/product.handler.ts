@@ -96,7 +96,11 @@ export class ProductHandler {
         payload.category_ids[payload.category_ids.length - 1]);
 
     if (primaryCatId && typeof primaryCatId === 'string') {
-      categoryIds = await this.categoryProjection.resolvePathIds(primaryCatId);
+      const resolved =
+        await this.categoryProjection.resolvePathIds(primaryCatId);
+      // Catalog does not publish category events, so the projection may not know
+      // the category yet: index the leaf id rather than no category at all.
+      categoryIds = resolved.length > 0 ? resolved : [primaryCatId];
     }
 
     const change = this.builder.build(evt, current);

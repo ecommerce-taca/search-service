@@ -160,4 +160,29 @@ describe('ProductEventHandler', () => {
       );
     });
   });
+
+  describe('category fallback when catalog sends no category events', () => {
+    it('indexes the primary category id when the projection returns no path', async () => {
+      mockCategoryProjection.resolvePathIds.mockResolvedValue([]);
+      const doc = { product_id: 'prod-1', category_ids: [] };
+      mockBuilder.build.mockReturnValue({
+        kind: 'UPSERT',
+        id: 'prod-1',
+        doc: doc as unknown as ProductSearchDocument,
+      });
+
+      await handler.handle({
+        event_id: 'evt-2',
+        schema_version: 1,
+        event_type: 'product.published',
+        occurred_at: '2026-10-14T10:00:00Z',
+        aggregate_type: 'PRODUCT',
+        aggregate_id: 'prod-1',
+        version: 2,
+        payload: { product_id: 'prod-1', primary_category_id: 'cat-leaf' },
+      });
+
+      expect(doc.category_ids).toEqual(['cat-leaf']);
+    });
+  });
 });

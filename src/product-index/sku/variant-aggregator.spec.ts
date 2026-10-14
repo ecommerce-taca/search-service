@@ -1,3 +1,4 @@
+import { ProductSearchDocument } from '../interfaces';
 import { VariantAggregator } from './variant-aggregator';
 
 describe('VariantAggregator', () => {
@@ -254,5 +255,58 @@ describe('VariantAggregator', () => {
 
       expect(result.attribute_pairs).toEqual(['valid_key_1=val1']);
     });
+  });
+});
+
+describe('VariantAggregator.replaceAll (catalog product.skus_updated)', () => {
+  const aggregator = new VariantAggregator();
+
+  it('replaces the full SKU set and recomputes active attributes', () => {
+    const current = {
+      variant_skus: {
+        'sku-old': {
+          status: 'ACTIVE',
+          attributes: { color: 'Đỏ' },
+          version: 2,
+        },
+      },
+    } as unknown as ProductSearchDocument;
+
+    const result = aggregator.replaceAll(
+      current,
+      [
+        {
+          sku_id: 'sku-1',
+          status: 'ACTIVE',
+          attributes: { color: 'Đen', size: 'M' },
+        },
+        { sku_id: 'sku-2', status: 'INACTIVE', attributes: { color: 'Trắng' } },
+        {
+          sku_id: 'sku-3',
+          status: 'ACTIVE',
+          attributes: { 'BAD-KEY': 'x', size: 'L' },
+        },
+      ],
+      3,
+      'prod-1',
+    );
+
+    expect(result).not.toBeNull();
+    expect(Object.keys(result!.variant_skus).sort()).toEqual([
+      'sku-1',
+      'sku-2',
+      'sku-3',
+    ]);
+    expect(result!.attributes).toEqual({ color: ['Đen'], size: ['L', 'M'] });
+    expect(result!.attribute_pairs).toEqual(['color=Đen', 'size=L', 'size=M']);
+  });
+
+  it('skips a snapshot older than state already applied', () => {
+    const current = {
+      variant_skus: {
+        'sku-1': { status: 'ACTIVE', attributes: { color: 'Đen' }, version: 5 },
+      },
+    } as unknown as ProductSearchDocument;
+    expect(aggregator.replaceAll(current, [], 4, 'prod-1')).toBeNull();
   });
 });

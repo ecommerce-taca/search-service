@@ -73,6 +73,55 @@ export class SkuHandler {
     ]);
   }
 
+  /** Catalog `product.skus_updated`: full SKU snapshot of one product. */
+  async handleSkusUpdated(evt: DomainEvent<unknown>): Promise<void> {
+    const payload = (evt.payload || {}) as {
+      product_id?: string;
+      skus?: SkuEventPayload[];
+    };
+    const productId = payload.product_id || evt.aggregate_id;
+    if (!productId || !Array.isArray(payload.skus)) {
+      throw new SearchException(
+        SearchErrorCode.SEARCH_EVENT_INVALID,
+        'product.skus_updated missing product_id or skus',
+      );
+    }
+
+    const productsAlias = getProductsAlias(this.configService.esIndexPrefix);
+    const current = await this.fetchCurrent(productsAlias, productId);
+    if (!current) {
+      this.logger.warn(
+        `Product ${productId} not found when applying SKU snapshot ${evt.event_id}`,
+      );
+      return;
+    }
+
+    const aggregated = this.variantAggregator.replaceAll(
+      current,
+      payload.skus,
+      evt.version,
+      productId,
+    );
+    if (!aggregated) {
+      this.logger.debug(
+        `SKU snapshot ${evt.event_id} skipped for product ${productId} (older version)`,
+      );
+      return;
+    }
+
+    await this.indexWriter.bulkPartialUpdate(productsAlias, [
+      {
+        id: productId,
+        doc: {
+          variant_skus: aggregated.variant_skus,
+          attributes: aggregated.attributes,
+          attribute_pairs: aggregated.attribute_pairs,
+          indexed_at: new Date().toISOString(),
+        },
+      },
+    ]);
+  }
+
   private async fetchCurrent(
     index: string,
     id: string,

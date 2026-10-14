@@ -27,6 +27,8 @@ import {
 import { DomainEvent, KafkaMessageInput } from '../interfaces';
 import { DlqPublisher } from './dlq-publisher';
 
+const SKUS_UPDATED_EVENT = 'product.skus_updated';
+
 @Injectable()
 export class EventProcessor {
   private readonly logger = new Logger(EventProcessor.name);
@@ -105,6 +107,17 @@ export class EventProcessor {
       if (evt.version != null) {
         evt.version = +evt.version || 0;
       }
+      if (typeof evt.payload === 'string') {
+        // Debezium's outbox router emits the payload as a JSON string unless
+        // collection.expand.json.payload=true.
+        try {
+          evt.payload = JSON.parse(evt.payload) as unknown;
+        } catch (payloadErr) {
+          return sendInvalid(
+            `Unparseable payload on ${topic}: ${payloadErr instanceof Error ? payloadErr.name : 'UnknownError'}`,
+          );
+        }
+      }
 
       if ((await this.checkDeduplication(evt, topic)) !== 'DUPLICATE') {
         await this.executeWithRetry(topic, evt, ctx);
@@ -172,6 +185,10 @@ export class EventProcessor {
   }
 
   private async dispatchToHandler(topic: string, evt: DomainEvent<unknown>) {
+    if (evt.event_type === SKUS_UPDATED_EVENT) {
+      // Catalog ships the full SKU list of a product on the product topic.
+      return this.skuHandler.handleSkusUpdated(evt);
+    }
     const p = this.configService.kafkaTopicPrefix;
     const match = [
       [KAFKA_TOPICS.PRODUCT_EVENTS, this.productHandler],
