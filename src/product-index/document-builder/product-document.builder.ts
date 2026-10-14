@@ -366,8 +366,8 @@ export class ProductDocumentBuilder implements IProductDocumentBuilder {
 
     const createdAt =
       current?.created_at ||
-      payload.published_at ||
       payload.created_at ||
+      payload.published_at ||
       evt.occurred_at ||
       new Date().toISOString();
 

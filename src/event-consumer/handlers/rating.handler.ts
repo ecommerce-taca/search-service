@@ -29,7 +29,9 @@ export class RatingHandler {
 
   constructor(
     @Inject(ELASTICSEARCH_CLIENT) clientOrWriter: Client | IIndexWriter,
-    @Optional() configServiceOrClient?: AppConfigService | Client,
+    @Optional()
+    @Inject(AppConfigService)
+    configServiceOrClient?: AppConfigService | Client,
     @Optional()
     @Inject(INDEX_WRITER)
     writerOrConfig?: IIndexWriter | AppConfigService,

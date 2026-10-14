@@ -31,22 +31,32 @@ describe('CategoryProjectionWriter', () => {
     };
 
     mockCategoryProjection = {
-      getMany: jest.fn().mockResolvedValue(
-        new Map([
-          [
-            'cat-root',
-            {
-              category_id: 'cat-root',
-              name: 'Thiết bị điện tử',
-              parent_id: null,
-              path_ids: ['cat-root'],
-              status: 'ACTIVE',
-              source_version: 1,
-              updated_at: '2026-10-14T10:00:00Z',
-            },
-          ],
-        ]),
-      ),
+      getMany: jest.fn().mockImplementation(async (ids: string[]) => {
+        const map = new Map();
+        if (ids.includes('cat-root')) {
+          map.set('cat-root', {
+            category_id: 'cat-root',
+            name: 'Thiết bị điện tử',
+            parent_id: null,
+            path_ids: ['cat-root'],
+            status: 'ACTIVE',
+            source_version: 1,
+            updated_at: '2026-10-14T10:00:00Z',
+          });
+        }
+        if (ids.includes('cat-phones')) {
+          map.set('cat-phones', {
+            category_id: 'cat-phones',
+            name: 'Điện thoại',
+            parent_id: 'cat-root',
+            path_ids: ['cat-root', 'cat-phones'],
+            status: 'ACTIVE',
+            source_version: 1,
+            updated_at: '2026-10-14T10:00:00Z',
+          });
+        }
+        return map;
+      }),
       resolvePathIds: jest.fn().mockImplementation(async (id: string) => {
         if (id === 'cat-root') return ['cat-root'];
         if (id === 'cat-phones') return ['cat-root', 'cat-phones'];
@@ -188,17 +198,6 @@ describe('CategoryProjectionWriter', () => {
 
   describe('[IDX-CAT-03] name change without path change', () => {
     it('[IDX-CAT-03] should not search or re-index products when only category name changes', async () => {
-      (mockClient.get as jest.Mock).mockResolvedValueOnce({
-        found: true,
-        _source: {
-          category_id: 'cat-phones',
-          name: 'Điện thoại',
-          parent_id: 'cat-root',
-          path_ids: ['cat-root', 'cat-phones'],
-          source_version: 1,
-        },
-      });
-
       const nameChangeEvent = {
         category_id: 'cat-phones',
         name: 'Điện thoại di động (Đổi tên)',
@@ -218,16 +217,21 @@ describe('CategoryProjectionWriter', () => {
 
   describe('[IDX-CAT-04] version conflict or stale version', () => {
     it('[IDX-CAT-04] should skip category update when incoming version is older than stored projection version', async () => {
-      (mockClient.get as jest.Mock).mockResolvedValueOnce({
-        found: true,
-        _source: {
-          category_id: 'cat-phones',
-          name: 'Điện thoại',
-          parent_id: 'cat-root',
-          path_ids: ['cat-root', 'cat-phones'],
-          source_version: 5,
-        },
-      });
+      (mockCategoryProjection.getMany as jest.Mock).mockResolvedValueOnce(
+        new Map([
+          [
+            'cat-phones',
+            {
+              category_id: 'cat-phones',
+              name: 'Điện thoại',
+              parent_id: 'cat-root',
+              path_ids: ['cat-root', 'cat-phones'],
+              status: 'ACTIVE',
+              source_version: 5,
+            },
+          ],
+        ]),
+      );
 
       const staleEvent = {
         category_id: 'cat-phones',

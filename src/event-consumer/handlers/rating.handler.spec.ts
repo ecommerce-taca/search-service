@@ -1,7 +1,7 @@
 import { Client } from '@elastic/elasticsearch';
 import { IIndexWriter } from '../../product-index/interfaces';
 import { DomainEvent } from '../interfaces';
-import { RatingEventHandler } from './rating-event.handler';
+import { RatingEventHandler } from './rating.handler';
 
 describe('RatingEventHandler', () => {
   let handler: RatingEventHandler;

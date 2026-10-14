@@ -24,3 +24,9 @@ export interface IConsumerStatusProvider {
 }
 
 export const CONSUMER_STATUS_PROVIDER = 'IConsumerStatusProvider';
+
+export interface KafkaMessageInput {
+  headers?: Record<string, Buffer | string | undefined | (Buffer | string)[]>;
+  value: Buffer | string | null;
+  offset: string;
+}

@@ -32,7 +32,9 @@ export class ProductHandler {
   constructor(
     @Inject(ELASTICSEARCH_CLIENT)
     clientOrBuilder: Client | IProductDocumentBuilder,
-    @Optional() configServiceOrWriter?: AppConfigService | IIndexWriter,
+    @Optional()
+    @Inject(AppConfigService)
+    configServiceOrWriter?: AppConfigService | IIndexWriter,
     @Optional()
     @Inject(PRODUCT_DOCUMENT_BUILDER)
     builderOrCatProj?: IProductDocumentBuilder | ICategoryProjection,

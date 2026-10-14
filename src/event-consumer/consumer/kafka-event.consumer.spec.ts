@@ -1,11 +1,26 @@
 import { Client } from '@elastic/elasticsearch';
+import { Test, TestingModule } from '@nestjs/testing';
 import { Consumer, Kafka, Producer } from 'kafkajs';
+import { Registry } from 'prom-client';
 import {
   EVENT_RETRY_BACKOFF_MS,
   EVENT_RETRY_COUNT,
 } from '../../common/constants';
 import { RequestContext } from '../../common/context/request-context';
 import { AppConfigService } from '../../config/config.service';
+import { MetricsService } from '../../observability/metrics.service';
+import { ELASTICSEARCH_CLIENT } from '../../product-index/elasticsearch.module';
+import {
+  CatalogHandler,
+  CategoryHandler,
+  ProductHandler,
+  RatingHandler,
+  SkuHandler,
+} from '../handlers';
+import { KAFKA_CLIENT } from '../kafka.module';
+import { ConsumerStatusService } from '../status/consumer-status.service';
+import { DlqPublisher } from './dlq-publisher';
+import { EventProcessor } from './event-processor';
 import { KafkaEventConsumer } from './kafka-event.consumer';
 
 describe('KafkaEventConsumer', () => {
@@ -14,11 +29,81 @@ describe('KafkaEventConsumer', () => {
   let mockConsumer: jest.Mocked<Partial<Consumer>>;
   let mockProducer: jest.Mocked<Partial<Producer>>;
   let mockClient: jest.Mocked<Partial<Client>>;
+  let testRegistry: Registry;
   let mockConfigService: jest.Mocked<Partial<AppConfigService>> & {
     kafkaConsumerEnabled?: boolean;
+    kafkaGroupId?: string;
+    kafkaTopicPrefix?: string;
   };
+  let mockProductHandler: jest.Mocked<Partial<ProductHandler>>;
+  let mockSkuHandler: jest.Mocked<Partial<SkuHandler>>;
+  let mockCategoryHandler: jest.Mocked<Partial<CategoryHandler>>;
+  let mockCatalogHandler: jest.Mocked<Partial<CatalogHandler>>;
+  let mockRatingHandler: jest.Mocked<Partial<RatingHandler>>;
+  let mockStatusService: jest.Mocked<Partial<ConsumerStatusService>>;
 
-  beforeEach(() => {
+  async function createTestModule(overrides?: {
+    config?: Partial<AppConfigService>;
+    productHandler?: Partial<ProductHandler>;
+  }): Promise<TestingModule> {
+    const config = { ...mockConfigService, ...(overrides?.config || {}) };
+    testRegistry = new Registry();
+    return Test.createTestingModule({
+      providers: [
+        KafkaEventConsumer,
+        EventProcessor,
+        DlqPublisher,
+        {
+          provide: AppConfigService,
+          useValue: config,
+        },
+        {
+          provide: KAFKA_CLIENT,
+          useValue: mockKafka,
+        },
+        {
+          provide: Kafka,
+          useValue: mockKafka,
+        },
+        {
+          provide: ELASTICSEARCH_CLIENT,
+          useValue: mockClient,
+        },
+        {
+          provide: MetricsService,
+          useValue: {
+            getRegistry: jest.fn().mockReturnValue(testRegistry),
+          },
+        },
+        {
+          provide: ProductHandler,
+          useValue: overrides?.productHandler || mockProductHandler,
+        },
+        {
+          provide: SkuHandler,
+          useValue: mockSkuHandler,
+        },
+        {
+          provide: CategoryHandler,
+          useValue: mockCategoryHandler,
+        },
+        {
+          provide: CatalogHandler,
+          useValue: mockCatalogHandler,
+        },
+        {
+          provide: RatingHandler,
+          useValue: mockRatingHandler,
+        },
+        {
+          provide: ConsumerStatusService,
+          useValue: mockStatusService,
+        },
+      ],
+    }).compile();
+  }
+
+  beforeEach(async () => {
     mockConsumer = {
       connect: jest.fn().mockResolvedValue(undefined),
       disconnect: jest.fn().mockResolvedValue(undefined),
@@ -40,6 +125,7 @@ describe('KafkaEventConsumer', () => {
 
     mockClient = {
       index: jest.fn().mockResolvedValue({ result: 'created' }),
+      create: jest.fn().mockResolvedValue({ result: 'created' }),
       update: jest.fn().mockResolvedValue({ result: 'updated' }),
       get: jest.fn().mockResolvedValue({ found: false }),
     };
@@ -50,11 +136,28 @@ describe('KafkaEventConsumer', () => {
       kafkaTopicPrefix: 'test-',
     };
 
-    consumerService = new KafkaEventConsumer(
-      mockKafka as unknown as Kafka,
-      mockClient as unknown as Client,
-      mockConfigService as unknown as AppConfigService,
-    );
+    mockProductHandler = {
+      handle: jest.fn().mockResolvedValue(undefined),
+    };
+    mockSkuHandler = {
+      handle: jest.fn().mockResolvedValue(undefined),
+    };
+    mockCategoryHandler = {
+      handle: jest.fn().mockResolvedValue(undefined),
+    };
+    mockCatalogHandler = {
+      handle: jest.fn().mockResolvedValue(undefined),
+    };
+    mockRatingHandler = {
+      handle: jest.fn().mockResolvedValue(undefined),
+    };
+    mockStatusService = {
+      setConsumerState: jest.fn(),
+      recordEventProcessed: jest.fn(),
+    };
+
+    const module = await createTestModule();
+    consumerService = module.get<KafkaEventConsumer>(KafkaEventConsumer);
   });
 
   describe('[IDX-CSM-01] topic subscriptions', () => {
@@ -76,13 +179,11 @@ describe('KafkaEventConsumer', () => {
     });
 
     it('[IDX-CSM-01] should not start consumer when kafkaConsumerEnabled is false', async () => {
-      mockConfigService.kafkaConsumerEnabled = false;
-
-      const disabledConsumer = new KafkaEventConsumer(
-        mockKafka as unknown as Kafka,
-        mockClient as unknown as Client,
-        mockConfigService as unknown as AppConfigService,
-      );
+      const module = await createTestModule({
+        config: { kafkaConsumerEnabled: false },
+      });
+      const disabledConsumer =
+        module.get<KafkaEventConsumer>(KafkaEventConsumer);
 
       await disabledConsumer.onApplicationBootstrap();
 
@@ -102,11 +203,74 @@ describe('KafkaEventConsumer', () => {
         }),
       );
     });
+
+    it('should not resolve offset and should propagate error when DLQ send rejects', async () => {
+      const dlqError = new Error('Kafka broker unavailable for DLQ');
+      mockProducer.send = jest.fn().mockRejectedValue(dlqError);
+
+      const failingProductHandler = {
+        handle: jest
+          .fn()
+          .mockRejectedValue(new Error('Handler permanent failure')),
+      };
+
+      const module = await createTestModule({
+        productHandler: failingProductHandler,
+      });
+      const consumer = module.get<KafkaEventConsumer>(KafkaEventConsumer);
+
+      await consumer.onApplicationBootstrap();
+
+      const runCall = (mockConsumer.run as jest.Mock).mock.calls[0][0];
+      const eachBatch = runCall.eachBatch;
+
+      const resolveOffset = jest.fn();
+      const heartbeat = jest.fn().mockResolvedValue(undefined);
+      const commitOffsetsIfNecessary = jest.fn().mockResolvedValue(undefined);
+
+      const batch = {
+        topic: 'test-product.events.v1',
+        partition: 0,
+        highWatermark: '10',
+        messages: [
+          {
+            offset: '101',
+            key: Buffer.from('prod-1'),
+            value: Buffer.from(
+              JSON.stringify({
+                event_id: 'evt-dlq-fail',
+                event_type: 'product.created',
+                aggregate_id: 'prod-1',
+                version: 1,
+                payload: { product_id: 'prod-1' },
+              }),
+            ),
+          },
+        ],
+      };
+
+      await expect(
+        eachBatch({
+          batch,
+          resolveOffset,
+          heartbeat,
+          commitOffsetsIfNecessary,
+          isRunning: () => true,
+          isStale: () => false,
+        }),
+      ).rejects.toThrow('Kafka broker unavailable for DLQ');
+
+      expect(resolveOffset).not.toHaveBeenCalled();
+      expect(commitOffsetsIfNecessary).not.toHaveBeenCalled();
+    });
   });
 
   describe('[IDX-CSM-03] deduplication via search-consumer-state', () => {
     it('[IDX-CSM-03] should check or write consumer-state doc with op_type create and skip on 409 conflict', async () => {
-      // Simulate ES throwing 409 conflict for existing event_id
+      mockClient.create = jest.fn().mockRejectedValueOnce({
+        statusCode: 409,
+        message: 'version conflict, document already exists',
+      });
       mockClient.index = jest.fn().mockRejectedValueOnce({
         statusCode: 409,
         message: 'version conflict, document already exists',
@@ -125,7 +289,6 @@ describe('KafkaEventConsumer', () => {
 
       const result = await consumerService.processEvent(event, {});
 
-      // Duplicate should be detected and skipped without error
       expect(result).toEqual(
         expect.objectContaining({
           status: 'SKIPPED',
@@ -196,7 +359,6 @@ describe('KafkaEventConsumer', () => {
 
       await consumerService.processWithRetry(event, headers, failingHandler);
 
-      // Verify message sent to DLQ topic
       expect(mockProducer.send).toHaveBeenCalled();
       const sendArgs = (mockProducer.send as jest.Mock).mock.calls[0][0];
 
@@ -206,7 +368,6 @@ describe('KafkaEventConsumer', () => {
       const dlqMessage = sendArgs.messages[0];
       const parsedValue = JSON.parse(dlqMessage.value.toString());
 
-      // Redacted payload verification: no payload body; keep event_id, event_type, aggregate_id, version, error_code
       expect(parsedValue.event_id).toBe('evt-poison-1');
       expect(parsedValue.event_type).toBe('product.created');
       expect(parsedValue.aggregate_id).toBe('prod-poison');
@@ -214,7 +375,6 @@ describe('KafkaEventConsumer', () => {
       expect(parsedValue.payload).toBeUndefined();
       expect(parsedValue.sensitive_secret).toBeUndefined();
 
-      // Original headers propagation verification
       expect(dlqMessage.headers.traceparent).toBeDefined();
       expect(dlqMessage.headers['x-request-id']).toBeDefined();
     });
@@ -241,7 +401,6 @@ describe('KafkaEventConsumer', () => {
 
       let capturedTraceId: string | undefined;
       const handler = jest.fn().mockImplementation(() => {
-        // Here we test that trace context is active
         capturedTraceId = RequestContext.getTraceId();
         return Promise.resolve({ status: 'PROCESSED' });
       });

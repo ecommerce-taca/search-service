@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { DlqPublisher } from './consumer/dlq-publisher';
+import { EventProcessor } from './consumer/event-processor';
 import { KafkaEventConsumer } from './consumer/kafka-event.consumer';
 import {
   CatalogHandler,
@@ -24,6 +26,8 @@ import { ConsumerStatusService } from './status/consumer-status.service';
       provide: CONSUMER_STATUS_PROVIDER,
       useClass: ConsumerStatusService,
     },
+    DlqPublisher,
+    EventProcessor,
     KafkaEventConsumer,
   ],
   exports: [
@@ -35,6 +39,8 @@ import { ConsumerStatusService } from './status/consumer-status.service';
     RatingHandler,
     ConsumerStatusService,
     CONSUMER_STATUS_PROVIDER,
+    DlqPublisher,
+    EventProcessor,
     KafkaEventConsumer,
   ],
 })

@@ -6,7 +6,7 @@ import {
   IProductDocumentBuilder,
   ProductSearchDocument,
 } from '../../product-index/interfaces';
-import { ProductEventHandler } from './product-event.handler';
+import { ProductEventHandler } from './product.handler';
 
 describe('ProductEventHandler', () => {
   let handler: ProductEventHandler;

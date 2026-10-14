@@ -12,6 +12,13 @@ import {
 } from '../src/common/constants';
 import { VisibilityStatus } from '../src/common/enums';
 import { AppConfigService } from '../src/config/config.service';
+import { Test, TestingModule } from '@nestjs/testing';
+import { ObservabilityModule } from '../src/observability/observability.module';
+import { ProductIndexModule } from '../src/product-index/product-index.module';
+import { EventConsumerModule } from '../src/event-consumer/event-consumer.module';
+import { IndexBootstrapService } from '../src/product-index/index-bootstrap.service';
+import { ELASTICSEARCH_CLIENT } from '../src/product-index/elasticsearch.module';
+import { KAFKA_CLIENT } from '../src/event-consumer/kafka.module';
 import { KafkaEventConsumer } from '../src/event-consumer/consumer/kafka-event.consumer';
 import {
   CONSUMER_STATE_MAPPING_V1,
@@ -20,12 +27,14 @@ import {
   SEARCH_CATEGORIES_MAPPING_V1,
 } from '../src/product-index/mappings';
 
-import categoriesFixture from './fixtures/indexing/categories.json';
-import orderingDuplicatesFixture from './fixtures/indexing/ordering-duplicates.json';
-import poisonEventsFixture from './fixtures/indexing/poison-events.json';
-import productsFixture from './fixtures/indexing/products.json';
-import ratingsFixture from './fixtures/indexing/ratings.json';
-import skusFixture from './fixtures/indexing/skus.json';
+import {
+  categoriesJson as categoriesFixture,
+  orderingDuplicatesJson as orderingDuplicatesFixture,
+  poisonEventsJson as poisonEventsFixture,
+  productsJson as productsFixture,
+  ratingsJson as ratingsFixture,
+  skusJson as skusFixture,
+} from './fixtures/indexing';
 
 describe('Indexing Module (Integration on real ES + Kafka cluster)', () => {
   let esClient: Client;
@@ -119,12 +128,29 @@ describe('Indexing Module (Integration on real ES + Kafka cluster)', () => {
     kafkaProducer = kafka.producer();
     await kafkaProducer.connect();
 
-    // 3. Initialize and start KafkaEventConsumer
-    kafkaConsumerService = new KafkaEventConsumer(
-      kafka,
-      esClient,
-      configServiceMock as AppConfigService,
-    );
+    // 3. Initialize and start KafkaEventConsumer via Nest TestingModule
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [ObservabilityModule, ProductIndexModule, EventConsumerModule],
+    })
+      .overrideProvider(AppConfigService)
+      .useValue(configServiceMock)
+      .overrideProvider(ELASTICSEARCH_CLIENT)
+      .useValue(esClient)
+      .overrideProvider(Client)
+      .useValue(esClient)
+      .overrideProvider(KAFKA_CLIENT)
+      .useValue(kafka)
+      .overrideProvider(Kafka)
+      .useValue(kafka)
+      .overrideProvider(IndexBootstrapService)
+      .useValue({
+        onApplicationBootstrap: jest.fn().mockResolvedValue(undefined),
+        bootstrap: jest.fn().mockResolvedValue({}),
+      })
+      .compile();
+
+    kafkaConsumerService =
+      moduleFixture.get<KafkaEventConsumer>(KafkaEventConsumer);
     await kafkaConsumerService.onApplicationBootstrap();
   }, 60000);
 

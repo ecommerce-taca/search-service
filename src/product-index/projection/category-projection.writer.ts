@@ -89,24 +89,11 @@ export class CategoryProjectionWriter {
       this.configService?.esIndexPrefix || '',
     );
 
-    // Look up existing projection
+    // Look up existing projection via ICategoryProjection
     let existing: CategoryProjection | undefined;
     if (this.categoryProjection) {
       const existingMap = await this.categoryProjection.getMany([categoryId]);
       existing = existingMap.get(categoryId);
-    }
-    if (!existing) {
-      try {
-        const res = await this.client.get<CategoryProjection>({
-          index: categoriesIndex,
-          id: categoryId,
-        });
-        if (res && res._source) {
-          existing = res._source;
-        }
-      } catch {
-        // Not found or index doesn't exist
-      }
     }
 
     if (existing && evt.version < existing.source_version) {

@@ -209,15 +209,21 @@ export class ConsumerStatusService implements IConsumerStatusProvider {
             }
             result[topic] = topicLag;
             this.liveLagByTopic[topic] = topicLag;
-          } catch {
-            // keep fallback
+          } catch (err: unknown) {
+            // Admin offset lookup for this topic failed; continue with in-memory liveLagByTopic
+            this.logger.debug(
+              `Failed fetching admin partition offsets for ${topic}, using live lag fallback: ${err}`,
+            );
           }
         }
       } finally {
         await admin.disconnect();
       }
-    } catch {
-      // Fallback to tracked liveLagByTopic
+    } catch (err: unknown) {
+      // Admin client connection or group offset fetch failed; fallback to in-memory liveLagByTopic
+      this.logger.debug(
+        `Failed fetching consumer group offsets from Kafka admin, using live lag fallback: ${err}`,
+      );
     }
 
     return result;
