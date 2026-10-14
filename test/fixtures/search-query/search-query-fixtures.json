@@ -1,0 +1,408 @@
+{
+  "search_categories": [
+    {
+      "category_id": "cat-fashion",
+      "name": "Thời trang",
+      "parent_id": null,
+      "path_ids": ["cat-fashion"],
+      "status": "ACTIVE",
+      "source_version": 1,
+      "updated_at": "2026-08-30T09:00:00Z"
+    },
+    {
+      "category_id": "cat-outerwear",
+      "name": "Áo khoác",
+      "parent_id": "cat-fashion",
+      "path_ids": ["cat-fashion", "cat-outerwear"],
+      "status": "ACTIVE",
+      "source_version": 1,
+      "updated_at": "2026-08-30T09:00:00Z"
+    },
+    {
+      "category_id": "cat-tech",
+      "name": "Đồ công nghệ",
+      "parent_id": null,
+      "path_ids": ["cat-tech"],
+      "status": "ACTIVE",
+      "source_version": 1,
+      "updated_at": "2026-08-30T09:00:00Z"
+    },
+    {
+      "category_id": "cat-phone",
+      "name": "Điện thoại",
+      "parent_id": "cat-tech",
+      "path_ids": ["cat-tech", "cat-phone"],
+      "status": "ACTIVE",
+      "source_version": 1,
+      "updated_at": "2026-08-30T09:00:00Z"
+    },
+    {
+      "category_id": "cat-laptop",
+      "name": "Laptop",
+      "parent_id": "cat-tech",
+      "path_ids": ["cat-tech", "cat-laptop"],
+      "status": "ACTIVE",
+      "source_version": 1,
+      "updated_at": "2026-08-30T09:00:00Z"
+    }
+  ],
+  "products": [
+    {
+      "product_id": "prod-001",
+      "shop_id": "shop-001",
+      "shop": {
+        "shop_id": "shop-001",
+        "name": "Fashion House"
+      },
+      "title": "Áo khoác cotton nam cao cấp",
+      "title_exact": "Áo khoác cotton nam cao cấp",
+      "slug": "ao-khoac-cotton-nam-cao-cap",
+      "description": "Áo khoác cotton thoáng mát, form rộng unisex phong cách Hàn Quốc",
+      "category_ids": ["cat-fashion", "cat-outerwear"],
+      "category_path": ["fashion", "outerwear"],
+      "brand": "Taca Brand",
+      "price": 350000,
+      "currency": "VND",
+      "cover_url": "https://cdn.example.com/p1.jpg",
+      "rating_avg": 4.8,
+      "rating_count": 50,
+      "sales_count": 120,
+      "attributes": {
+        "color": ["Đen", "Xanh"],
+        "size": ["L", "XL"]
+      },
+      "spec_attributes": {
+        "material": ["cotton 100%"],
+        "origin": ["Việt Nam"]
+      },
+      "attribute_pairs": ["color=Đen", "color=Xanh", "size=L", "size=XL"],
+      "suggest": ["Áo khoác cotton nam cao cấp", "Taca Brand"],
+      "visibility_status": "PUBLISHED",
+      "source_version": 10,
+      "source_event_id": "evt-prod-001",
+      "indexed_at": "2026-09-01T10:00:00Z",
+      "created_at": "2026-09-01T10:00:00Z"
+    },
+    {
+      "product_id": "prod-002",
+      "shop_id": "shop-001",
+      "shop": {
+        "shop_id": "shop-001",
+        "name": "Fashion House"
+      },
+      "title": "Áo khoác dù chống nước",
+      "title_exact": "Áo khoác dù chống nước",
+      "slug": "ao-khoac-du-chong-nuoc",
+      "description": "Áo khoác dù siêu nhẹ cản gió và chống thấm nước hiệu quả",
+      "category_ids": ["cat-fashion", "cat-outerwear"],
+      "category_path": ["fashion", "outerwear"],
+      "brand": "Ananas",
+      "price": 450000,
+      "currency": "VND",
+      "cover_url": "https://cdn.example.com/p2.jpg",
+      "rating_avg": 4.2,
+      "rating_count": 30,
+      "sales_count": 85,
+      "attributes": {
+        "color": ["Đen"],
+        "size": ["M", "L"]
+      },
+      "spec_attributes": {
+        "material": ["polyester"],
+        "origin": ["Việt Nam"]
+      },
+      "attribute_pairs": ["color=Đen", "size=M", "size=L"],
+      "suggest": ["Áo khoác dù chống nước", "Ananas"],
+      "visibility_status": "PUBLISHED",
+      "source_version": 12,
+      "source_event_id": "evt-prod-002",
+      "indexed_at": "2026-09-02T10:00:00Z",
+      "created_at": "2026-09-02T10:00:00Z"
+    },
+    {
+      "product_id": "prod-003",
+      "shop_id": "shop-002",
+      "shop": {
+        "shop_id": "shop-002",
+        "name": "Apple Store VN"
+      },
+      "title": "Điện thoại iPhone 16 Pro Max 256GB",
+      "title_exact": "Điện thoại iPhone 16 Pro Max 256GB",
+      "slug": "dien-thoai-iphone-16-pro-max-256gb",
+      "description": "Siêu phẩm Apple iPhone 16 Pro Max khung viền titan và chip A18 Pro",
+      "category_ids": ["cat-tech", "cat-phone"],
+      "category_path": ["tech", "phone"],
+      "brand": "Apple",
+      "price": 34990000,
+      "currency": "VND",
+      "cover_url": "https://cdn.example.com/p3.jpg",
+      "rating_avg": 4.9,
+      "rating_count": 200,
+      "sales_count": 500,
+      "attributes": {
+        "color": ["Titan tự nhiên", "Titan đen"],
+        "capacity_liter": ["256GB"]
+      },
+      "spec_attributes": {
+        "screen_size": ["6.9 inch"],
+        "chip": ["A18 Pro"]
+      },
+      "attribute_pairs": ["color=Titan tự nhiên", "color=Titan đen", "capacity_liter=256GB"],
+      "suggest": ["Điện thoại iPhone 16 Pro Max 256GB", "Apple"],
+      "visibility_status": "PUBLISHED",
+      "source_version": 25,
+      "source_event_id": "evt-prod-003",
+      "indexed_at": "2026-09-10T08:00:00Z",
+      "created_at": "2026-09-10T08:00:00Z"
+    },
+    {
+      "product_id": "prod-004",
+      "shop_id": "shop-002",
+      "shop": {
+        "shop_id": "shop-002",
+        "name": "Apple Store VN"
+      },
+      "title": "Điện thoại iPhone 15 128GB",
+      "title_exact": "Điện thoại iPhone 15 128GB",
+      "slug": "dien-thoai-iphone-15-128gb",
+      "description": "Apple iPhone 15 thiết kế Dynamic Island camera 48MP sắc nét",
+      "category_ids": ["cat-tech", "cat-phone"],
+      "category_path": ["tech", "phone"],
+      "brand": "Apple",
+      "price": 19990000,
+      "currency": "VND",
+      "cover_url": "https://cdn.example.com/p4.jpg",
+      "rating_avg": 4.7,
+      "rating_count": 150,
+      "sales_count": 420,
+      "attributes": {
+        "color": ["Xanh pastel", "Đen"],
+        "capacity_liter": ["128GB"]
+      },
+      "spec_attributes": {
+        "screen_size": ["6.1 inch"],
+        "chip": ["A16 Bionic"]
+      },
+      "attribute_pairs": ["color=Xanh pastel", "color=Đen", "capacity_liter=128GB"],
+      "suggest": ["Điện thoại iPhone 15 128GB", "Apple"],
+      "visibility_status": "PUBLISHED",
+      "source_version": 18,
+      "source_event_id": "evt-prod-004",
+      "indexed_at": "2026-08-15T08:00:00Z",
+      "created_at": "2026-08-15T08:00:00Z"
+    },
+    {
+      "product_id": "prod-005",
+      "shop_id": "shop-003",
+      "shop": {
+        "shop_id": "shop-003",
+        "name": "Samsung Flagship"
+      },
+      "title": "Điện thoại Samsung Galaxy S24 Ultra",
+      "title_exact": "Điện thoại Samsung Galaxy S24 Ultra",
+      "slug": "dien-thoai-samsung-galaxy-s24-ultra",
+      "description": "Flagship Samsung Galaxy S24 Ultra tích hợp Galaxy AI và bút S-Pen",
+      "category_ids": ["cat-tech", "cat-phone"],
+      "category_path": ["tech", "phone"],
+      "brand": "Samsung",
+      "price": 29990000,
+      "currency": "VND",
+      "cover_url": "https://cdn.example.com/p5.jpg",
+      "rating_avg": 4.6,
+      "rating_count": 110,
+      "sales_count": 310,
+      "attributes": {
+        "color": ["Xám Titan", "Đen"],
+        "capacity_liter": ["256GB", "512GB"]
+      },
+      "spec_attributes": {
+        "screen_size": ["6.8 inch"],
+        "stylus": ["S-Pen"]
+      },
+      "attribute_pairs": ["color=Xám Titan", "color=Đen", "capacity_liter=256GB", "capacity_liter=512GB"],
+      "suggest": ["Điện thoại Samsung Galaxy S24 Ultra", "Samsung"],
+      "visibility_status": "PUBLISHED",
+      "source_version": 15,
+      "source_event_id": "evt-prod-005",
+      "indexed_at": "2026-08-20T08:00:00Z",
+      "created_at": "2026-08-20T08:00:00Z"
+    },
+    {
+      "product_id": "prod-006",
+      "shop_id": "shop-003",
+      "shop": {
+        "shop_id": "shop-003",
+        "name": "Samsung Flagship"
+      },
+      "title": "Điện thoại Samsung Galaxy A15",
+      "title_exact": "Điện thoại Samsung Galaxy A15",
+      "slug": "dien-thoai-samsung-galaxy-a15",
+      "description": "Smartphone phân khúc phổ thông màn hình Super AMOLED 90Hz pin trâu",
+      "category_ids": ["cat-tech", "cat-phone"],
+      "category_path": ["tech", "phone"],
+      "brand": "Samsung",
+      "price": 4490000,
+      "currency": "VND",
+      "cover_url": "https://cdn.example.com/p6.jpg",
+      "rating_avg": 4.1,
+      "rating_count": 45,
+      "sales_count": 180,
+      "attributes": {
+        "color": ["Xanh dương", "Đen"],
+        "capacity_liter": ["128GB"]
+      },
+      "spec_attributes": {
+        "battery": ["5000mAh"]
+      },
+      "attribute_pairs": ["color=Xanh dương", "color=Đen", "capacity_liter=128GB"],
+      "suggest": ["Điện thoại Samsung Galaxy A15", "Samsung"],
+      "visibility_status": "PUBLISHED",
+      "source_version": 14,
+      "source_event_id": "evt-prod-006",
+      "indexed_at": "2026-08-25T08:00:00Z",
+      "created_at": "2026-08-25T08:00:00Z"
+    },
+    {
+      "product_id": "prod-007",
+      "shop_id": "shop-002",
+      "shop": {
+        "shop_id": "shop-002",
+        "name": "Apple Store VN"
+      },
+      "title": "Laptop Apple MacBook Air M3",
+      "title_exact": "Laptop Apple MacBook Air M3",
+      "slug": "laptop-apple-macbook-air-m3",
+      "description": "Máy tính xách tay Apple MacBook Air chip M3 mỏng nhẹ pin 18 giờ",
+      "category_ids": ["cat-tech", "cat-laptop"],
+      "category_path": ["tech", "laptop"],
+      "brand": "Apple",
+      "price": 27990000,
+      "currency": "VND",
+      "cover_url": "https://cdn.example.com/p7.jpg",
+      "rating_avg": 4.9,
+      "rating_count": 80,
+      "sales_count": 95,
+      "attributes": {
+        "color": ["Bạc", "Midnight"],
+        "capacity_liter": ["256GB", "512GB"]
+      },
+      "spec_attributes": {
+        "ram": ["16GB"],
+        "chip": ["Apple M3"]
+      },
+      "attribute_pairs": ["color=Bạc", "color=Midnight", "capacity_liter=256GB", "capacity_liter=512GB"],
+      "suggest": ["Laptop Apple MacBook Air M3", "Apple"],
+      "visibility_status": "PUBLISHED",
+      "source_version": 20,
+      "source_event_id": "evt-prod-007",
+      "indexed_at": "2026-09-05T08:00:00Z",
+      "created_at": "2026-09-05T08:00:00Z"
+    },
+    {
+      "product_id": "prod-008",
+      "shop_id": "shop-004",
+      "shop": {
+        "shop_id": "shop-004",
+        "name": "Asus Official"
+      },
+      "title": "Laptop Asus Vivobook 15",
+      "title_exact": "Laptop Asus Vivobook 15",
+      "slug": "laptop-asus-vivobook-15",
+      "description": "Laptop văn phòng Asus Vivobook màn hình OLED hiển thị rực rỡ",
+      "category_ids": ["cat-tech", "cat-laptop"],
+      "category_path": ["tech", "laptop"],
+      "brand": "Asus",
+      "price": 14500000,
+      "currency": "VND",
+      "cover_url": "https://cdn.example.com/p8.jpg",
+      "rating_avg": 4.3,
+      "rating_count": 60,
+      "sales_count": 110,
+      "attributes": {
+        "color": ["Bạc"],
+        "capacity_liter": ["512GB"]
+      },
+      "spec_attributes": {
+        "ram": ["8GB"],
+        "cpu": ["Core i5"]
+      },
+      "attribute_pairs": ["color=Bạc", "capacity_liter=512GB"],
+      "suggest": ["Laptop Asus Vivobook 15", "Asus"],
+      "visibility_status": "PUBLISHED",
+      "source_version": 9,
+      "source_event_id": "evt-prod-008",
+      "indexed_at": "2026-08-10T08:00:00Z",
+      "created_at": "2026-08-10T08:00:00Z"
+    },
+    {
+      "product_id": "prod-009",
+      "shop_id": "shop-001",
+      "shop": {
+        "shop_id": "shop-001",
+        "name": "Fashion House"
+      },
+      "title": "Áo khoác da lộn phong cách Hàn Quốc",
+      "title_exact": "Áo khoác da lộn phong cách Hàn Quốc",
+      "slug": "ao-khoac-da-lon-han-quoc",
+      "description": "Áo khoác da lộn nam ấm áp mùa đông cao cấp",
+      "category_ids": ["cat-fashion", "cat-outerwear"],
+      "category_path": ["fashion", "outerwear"],
+      "brand": "Taca Brand",
+      "price": 890000,
+      "currency": "VND",
+      "cover_url": "https://cdn.example.com/p9.jpg",
+      "rating_avg": 4.0,
+      "rating_count": 5,
+      "sales_count": 10,
+      "attributes": {
+        "color": ["Nâu"],
+        "size": ["L"]
+      },
+      "spec_attributes": {
+        "material": ["da lộn"]
+      },
+      "attribute_pairs": ["color=Nâu", "size=L"],
+      "suggest": ["Áo khoác da lộn", "Taca Brand"],
+      "visibility_status": "HIDDEN",
+      "source_version": 5,
+      "source_event_id": "evt-prod-009",
+      "indexed_at": "2026-09-08T10:00:00Z",
+      "created_at": "2026-09-08T10:00:00Z"
+    },
+    {
+      "product_id": "prod-010",
+      "shop_id": "shop-002",
+      "shop": {
+        "shop_id": "shop-002",
+        "name": "Apple Store VN"
+      },
+      "title": "Điện thoại iPhone 14 Pro 128GB Cũ",
+      "title_exact": "Điện thoại iPhone 14 Pro 128GB Cũ",
+      "slug": "dien-thoai-iphone-14-pro-128gb-cu",
+      "description": "iPhone 14 Pro đã qua sử dụng bảo hành 6 tháng",
+      "category_ids": ["cat-tech", "cat-phone"],
+      "category_path": ["tech", "phone"],
+      "brand": "Apple",
+      "price": 16000000,
+      "currency": "VND",
+      "cover_url": "https://cdn.example.com/p10.jpg",
+      "rating_avg": 3.8,
+      "rating_count": 20,
+      "sales_count": 40,
+      "attributes": {
+        "color": ["Tím"],
+        "capacity_liter": ["128GB"]
+      },
+      "spec_attributes": {
+        "condition": ["used"]
+      },
+      "attribute_pairs": ["color=Tím", "capacity_liter=128GB"],
+      "suggest": ["Điện thoại iPhone 14 Pro 128GB Cũ", "Apple"],
+      "visibility_status": "DELETED",
+      "source_version": 3,
+      "source_event_id": "evt-prod-010",
+      "indexed_at": "2026-07-01T08:00:00Z",
+      "created_at": "2026-07-01T08:00:00Z"
+    }
+  ]
+}
