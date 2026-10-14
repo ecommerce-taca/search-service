@@ -30,30 +30,23 @@ export class ReadinessService {
   ) {}
 
   async check(): Promise<ReadinessReport> {
-    // 1. Elasticsearch cluster health check
-    try {
-      let healthy = false;
-      if (
-        this.client.cluster &&
-        typeof this.client.cluster.health === 'function'
-      ) {
-        const clusterHealth = await this.client.cluster.health({
-          timeout: '1s',
-        });
-        const status = clusterHealth?.status;
-        healthy = status === 'green' || status === 'yellow';
-      } else if (
-        typeof (this.client as unknown as { ping?: () => Promise<boolean> })
-          .ping === 'function'
-      ) {
-        healthy = Boolean(
-          await (
-            this.client as unknown as { ping: () => Promise<boolean> }
-          ).ping(),
-        );
-      }
+    await this.checkElasticsearch();
+    const alias = await this.checkAlias();
+    const { consumer, eventLagSeconds } = await this.consumerStatus();
 
-      if (!healthy) {
+    return {
+      elasticsearch: 'UP',
+      alias,
+      consumer,
+      event_lag_seconds: eventLagSeconds,
+    };
+  }
+
+  private async checkElasticsearch(): Promise<void> {
+    try {
+      const clusterHealth = await this.client.cluster.health({ timeout: '1s' });
+      const status = clusterHealth?.status;
+      if (status !== 'green' && status !== 'yellow') {
         throw new SearchException(
           SearchErrorCode.SEARCH_UNAVAILABLE,
           undefined,
@@ -70,17 +63,13 @@ export class ReadinessService {
         'Elasticsearch connection refused or timed out',
       );
     }
+  }
 
-    // 2. Alias existence check
+  private async checkAlias(): Promise<string> {
     const alias = getProductsAlias(this.configService.esIndexPrefix);
     try {
       const exists = await this.client.indices.existsAlias({ name: alias });
-      const aliasExists =
-        typeof exists === 'boolean'
-          ? exists
-          : Boolean((exists as unknown as { body?: boolean })?.body ?? exists);
-
-      if (!aliasExists) {
+      if (!exists) {
         throw new SearchException(
           SearchErrorCode.SEARCH_INDEX_NOT_READY,
           undefined,
@@ -93,8 +82,13 @@ export class ReadinessService {
       }
       throw toSearchException(err);
     }
+    return alias;
+  }
 
-    // 3. Consumer status provider check (optional)
+  private async consumerStatus(): Promise<{
+    consumer: string;
+    eventLagSeconds: number;
+  }> {
     let consumer = 'PAUSED';
     let eventLagSeconds = 0;
 
@@ -118,11 +112,6 @@ export class ReadinessService {
       }
     }
 
-    return {
-      elasticsearch: 'UP',
-      alias,
-      consumer,
-      event_lag_seconds: eventLagSeconds,
-    };
+    return { consumer, eventLagSeconds };
   }
 }

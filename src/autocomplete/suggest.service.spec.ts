@@ -151,6 +151,40 @@ describe('SuggestService (Unit)', () => {
       );
     });
 
+    it('AC-U-05: defaults limit to 10 when limit is omitted', async () => {
+      mockEsClient.search.mockResolvedValueOnce({
+        suggest: { product_suggest: [] },
+        hits: { hits: [] },
+        aggregations: { brand_terms: { buckets: [] } },
+      });
+
+      await service.suggest({ prefix: 'ao' });
+
+      const callArgs = mockEsClient.search.mock.calls[0][0];
+      expect(callArgs.suggest.product_suggest.completion.size).toBe(10 * 3);
+    });
+
+    it('AC-U-06: accepts limit=5 and passes it through', async () => {
+      mockEsClient.search.mockResolvedValueOnce({
+        suggest: { product_suggest: [] },
+        hits: { hits: [] },
+        aggregations: { brand_terms: { buckets: [] } },
+      });
+
+      await service.suggest({ prefix: 'ao', limit: 5 });
+
+      const callArgs = mockEsClient.search.mock.calls[0][0];
+      expect(callArgs.suggest.product_suggest.completion.size).toBe(5 * 3);
+    });
+
+    it('AC-U-07: throws SEARCH_INVALID_INPUT when limit=15 (exceeds max 10)', async () => {
+      await expect(
+        service.suggest({ prefix: 'iphone', limit: 15 }),
+      ).rejects.toMatchObject({
+        code: SearchErrorCode.SEARCH_INVALID_INPUT,
+      });
+    });
+
     it('AC-U-08: throws SEARCH_INVALID_INPUT for invalid limit parameter in service call', async () => {
       await expect(
         service.suggest({ prefix: 'iphone', limit: -1 }),
@@ -406,12 +440,16 @@ describe('SuggestService (Unit)', () => {
         suggest: { product_suggest: [] },
         hits: { hits: [] },
         aggregations: {
-          brand_terms: {
-            buckets: [
-              { key: 'Apple', doc_count: 50 },
-              { key: 'Apex', doc_count: 10 },
-              { key: 'Samsung', doc_count: 100 },
-            ],
+          brands_global: {
+            brands_filtered: {
+              brand_terms: {
+                buckets: [
+                  { key: 'Apple', doc_count: 50 },
+                  { key: 'Apex', doc_count: 10 },
+                  { key: 'Samsung', doc_count: 100 },
+                ],
+              },
+            },
           },
         },
       });
@@ -432,8 +470,12 @@ describe('SuggestService (Unit)', () => {
           hits: [{ _source: { title: 'iphone 16 pro' } }],
         },
         aggregations: {
-          brand_terms: {
-            buckets: [{ key: 'Ipanema', doc_count: 20 }],
+          brands_global: {
+            brands_filtered: {
+              brand_terms: {
+                buckets: [{ key: 'Ipanema', doc_count: 20 }],
+              },
+            },
           },
         },
       });
@@ -548,8 +590,12 @@ describe('SuggestService (Unit)', () => {
           hits: [{ _source: { title: 'apple airpods pro' } }],
         },
         aggregations: {
-          brand_terms: {
-            buckets: [{ key: 'Apple', doc_count: 100 }],
+          brands_global: {
+            brands_filtered: {
+              brand_terms: {
+                buckets: [{ key: 'Apple', doc_count: 100 }],
+              },
+            },
           },
         },
       });
@@ -601,12 +647,16 @@ describe('SuggestService (Unit)', () => {
         suggest: { product_suggest: [] },
         hits: { hits: [] },
         aggregations: {
-          brand_terms: {
-            buckets: [
-              { key: 'Apple', doc_count: 50 },
-              { key: 'apple', doc_count: 30 },
-              { key: 'APPLE', doc_count: 20 },
-            ],
+          brands_global: {
+            brands_filtered: {
+              brand_terms: {
+                buckets: [
+                  { key: 'Apple', doc_count: 50 },
+                  { key: 'apple', doc_count: 30 },
+                  { key: 'APPLE', doc_count: 20 },
+                ],
+              },
+            },
           },
         },
       });

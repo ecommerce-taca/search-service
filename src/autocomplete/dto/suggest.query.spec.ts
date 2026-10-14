@@ -46,7 +46,7 @@ describe('SuggestQueryDto (Unit)', () => {
       ).rejects.toThrow();
     });
 
-    it('transforms and accepts string integer limit', async () => {
+    it('AC-U-06: transforms and accepts string integer limit', async () => {
       const raw = { prefix: 'iphone', limit: '5' };
       const transformed = (await pipe.transform(raw, {
         type: 'query',
@@ -56,7 +56,7 @@ describe('SuggestQueryDto (Unit)', () => {
       expect(transformed.limit).toBe(5);
     });
 
-    it('accepts integer limit outside 1..10 in DTO (semantic validation handled by service)', async () => {
+    it('AC-U-05: accepts integer limit outside 1..10 in DTO (semantic validation handled by service)', async () => {
       const values = [0, -1, 15];
       for (const val of values) {
         const raw = { prefix: 'iphone', limit: val };
@@ -66,7 +66,7 @@ describe('SuggestQueryDto (Unit)', () => {
       }
     });
 
-    it('rejects non-integer limit (e.g. strings that are not ints, floats)', async () => {
+    it('AC-U-07: rejects non-integer limit (e.g. strings that are not ints, floats)', async () => {
       const invalidValues = ['abc', 3.14];
       for (const val of invalidValues) {
         const raw = { prefix: 'iphone', limit: val };

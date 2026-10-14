@@ -8,6 +8,15 @@ import { toSearchException } from '../common/es';
 import { AppConfigService } from '../config/config.service';
 import { SuggestQueryDto } from './dto/suggest.query';
 
+// Named constants replacing magic numbers (MAJOR 3)
+const QUERY_FETCH_SIZE = 50;
+const COMPLETION_SIZE_MULTIPLIER = 3;
+const PHRASE_MAX_WORDS = 6;
+const PREFIX_MAX_CODE_POINTS = 100;
+const LIMIT_MIN = 1;
+const LIMIT_MAX = 10;
+const DEFAULT_LIMIT = 10;
+
 export interface Suggestion {
   text: string;
   type: SuggestionType;
@@ -57,7 +66,7 @@ export function extractPhrase(
 
   const remaining = title.slice(pos).trim();
   const words = remaining.split(/\s+/).filter(Boolean);
-  const truncated = words.slice(0, 6).join(' ');
+  const truncated = words.slice(0, PHRASE_MAX_WORDS).join(' ');
   return truncated.toLowerCase();
 }
 
@@ -77,13 +86,13 @@ export class SuggestService {
       event: 'suggest_query',
       prefix_length: codePoints,
       limit,
-      has_category: Boolean(query?.category_id),
+      has_category: Boolean(query.category_id),
     });
 
     const searchRequest = this.buildRequest(
       trimmedPrefix,
       limit,
-      query?.category_id,
+      query.category_id,
     );
 
     let res: estypes.SearchResponse<ProductDocSource>;
@@ -97,7 +106,7 @@ export class SuggestService {
     const querySuggestions = this.toQuerySuggestions(res, foldedPrefix);
     const productSuggestions = this.toProductSuggestions(
       res,
-      query?.category_id,
+      query.category_id,
     );
     const brandSuggestions = this.toBrandSuggestions(res, foldedPrefix);
 
@@ -115,8 +124,8 @@ export class SuggestService {
     codePoints: number;
   } {
     if (
-      query?.prefix === undefined ||
-      query?.prefix === null ||
+      query.prefix === undefined ||
+      query.prefix === null ||
       typeof query.prefix !== 'string'
     ) {
       throw new SearchException(
@@ -136,7 +145,7 @@ export class SuggestService {
     }
 
     const codePoints = Array.from(trimmedPrefix).length;
-    if (codePoints > 100) {
+    if (codePoints > PREFIX_MAX_CODE_POINTS) {
       throw new SearchException(
         SearchErrorCode.SEARCH_QUERY_TOO_LONG,
         undefined,
@@ -144,18 +153,18 @@ export class SuggestService {
       );
     }
 
-    const limit = query.limit ?? 10;
+    const limit = query.limit ?? DEFAULT_LIMIT;
     if (
       typeof limit !== 'number' ||
       Number.isNaN(limit) ||
       !Number.isInteger(limit) ||
-      limit < 1 ||
-      limit > 10
+      limit < LIMIT_MIN ||
+      limit > LIMIT_MAX
     ) {
       throw new SearchException(
         SearchErrorCode.SEARCH_INVALID_INPUT,
         undefined,
-        limit > 10
+        limit > LIMIT_MAX
           ? 'Limit cannot exceed 10.'
           : 'limit must be a positive integer between 1 and 10',
       );
@@ -171,33 +180,32 @@ export class SuggestService {
   ): SuggestSearchRequest {
     const alias = getProductsAlias(this.configService.esIndexPrefix);
 
-    const filter: estypes.QueryDslQueryContainer[] = [
+    // Build the base filter once and reuse (MAJOR 2)
+    const baseFilter: estypes.QueryDslQueryContainer[] = [
       { term: { visibility_status: 'PUBLISHED' } },
     ];
     if (categoryId) {
-      filter.push({ term: { category_ids: categoryId } });
+      baseFilter.push({ term: { category_ids: categoryId } });
     }
 
+    // Brand filter = base filter + prefix filter (MAJOR 2)
     const brandFilter: estypes.QueryDslQueryContainer[] = [
-      { term: { visibility_status: 'PUBLISHED' } },
-    ];
-    if (categoryId) {
-      brandFilter.push({ term: { category_ids: categoryId } });
-    }
-    brandFilter.push({
-      prefix: {
-        brand: {
-          value: trimmedPrefix,
-          case_insensitive: true,
+      ...baseFilter,
+      {
+        prefix: {
+          brand: {
+            value: trimmedPrefix,
+            case_insensitive: true,
+          },
         },
       },
-    });
+    ];
 
     return {
       index: alias,
       requestTimeout: ES_REQUEST_TIMEOUT_MS,
       _source: ['product_id', 'title', 'visibility_status', 'category_ids'],
-      size: 50,
+      size: QUERY_FETCH_SIZE,
       query: {
         bool: {
           must: [
@@ -209,7 +217,7 @@ export class SuggestService {
               },
             },
           ],
-          filter,
+          filter: baseFilter,
         },
       },
       suggest: {
@@ -217,7 +225,7 @@ export class SuggestService {
           prefix: trimmedPrefix,
           completion: {
             field: 'suggest',
-            size: limit * 3,
+            size: limit * COMPLETION_SIZE_MULTIPLIER,
             skip_duplicates: true,
           },
         },
@@ -330,6 +338,7 @@ export class SuggestService {
       return brandSuggestions;
     }
 
+    // Read only from brands_global.brands_filtered.brand_terms (MAJOR 1)
     let buckets: Array<{ key?: string | number; doc_count?: number }> = [];
 
     const globalAgg = aggs.brands_global as
@@ -340,12 +349,6 @@ export class SuggestService {
         | (estypes.AggregationsFilterAggregate & Record<string, unknown>)
         | undefined;
       const termsAgg = filterAgg?.brand_terms as
-        estypes.AggregationsStringTermsAggregate | undefined;
-      if (Array.isArray(termsAgg?.buckets)) {
-        buckets = termsAgg.buckets;
-      }
-    } else if (aggs.brand_terms) {
-      const termsAgg = aggs.brand_terms as
         estypes.AggregationsStringTermsAggregate | undefined;
       if (Array.isArray(termsAgg?.buckets)) {
         buckets = termsAgg.buckets;
