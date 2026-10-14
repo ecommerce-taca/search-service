@@ -1,0 +1,25 @@
+[
+  {
+    "event_id": "01912f70-poison-001",
+    "schema_version": 999,
+    "event_type": "product.published",
+    "occurred_at": "invalid-timestamp",
+    "aggregate_type": "PRODUCT",
+    "aggregate_id": "prod-poison-001",
+    "version": -1,
+    "payload": {
+      "corrupted_data": true,
+      "price": "not-a-number"
+    }
+  },
+  {
+    "event_id": "01912f70-poison-002",
+    "schema_version": 1,
+    "event_type": "product.created",
+    "occurred_at": "2026-10-14T12:00:00Z",
+    "aggregate_type": "PRODUCT",
+    "aggregate_id": "prod-poison-002",
+    "version": 1,
+    "payload": null
+  }
+]

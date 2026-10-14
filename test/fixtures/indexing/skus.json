@@ -1,0 +1,73 @@
+[
+  {
+    "event_id": "01912f70-sku-001-1",
+    "schema_version": 1,
+    "event_type": "sku.created",
+    "occurred_at": "2026-10-14T11:06:00Z",
+    "aggregate_type": "SKU",
+    "aggregate_id": "sku-001-1",
+    "version": 1,
+    "payload": {
+      "sku_id": "sku-001-1",
+      "product_id": "prod-001-published",
+      "status": "ACTIVE",
+      "attributes": {
+        "color": "Đen",
+        "size": "M"
+      },
+      "price": 249000
+    }
+  },
+  {
+    "event_id": "01912f70-sku-001-2",
+    "schema_version": 1,
+    "event_type": "sku.created",
+    "occurred_at": "2026-10-14T11:07:00Z",
+    "aggregate_type": "SKU",
+    "aggregate_id": "sku-001-2",
+    "version": 1,
+    "payload": {
+      "sku_id": "sku-001-2",
+      "product_id": "prod-001-published",
+      "status": "ACTIVE",
+      "attributes": {
+        "color": "Trắng",
+        "size": "L"
+      },
+      "price": 249000
+    }
+  },
+  {
+    "event_id": "01912f70-sku-001-2-deactivate",
+    "schema_version": 1,
+    "event_type": "sku.status_changed",
+    "occurred_at": "2026-10-14T11:08:00Z",
+    "aggregate_type": "SKU",
+    "aggregate_id": "sku-001-2",
+    "version": 2,
+    "payload": {
+      "sku_id": "sku-001-2",
+      "product_id": "prod-001-published",
+      "status": "INACTIVE"
+    }
+  },
+  {
+    "event_id": "01912f70-sku-invalid-key",
+    "schema_version": 1,
+    "event_type": "sku.updated",
+    "occurred_at": "2026-10-14T11:09:00Z",
+    "aggregate_type": "SKU",
+    "aggregate_id": "sku-001-invalid",
+    "version": 1,
+    "payload": {
+      "sku_id": "sku-001-invalid",
+      "product_id": "prod-001-published",
+      "status": "ACTIVE",
+      "attributes": {
+        "valid_key": "valid_value",
+        "INVALID-KEY!": "bad_key_value",
+        "too_long_key_exceeding_sixty_four_characters_limit_which_should_be_dropped_by_aggregator": "overflow"
+      }
+    }
+  }
+]

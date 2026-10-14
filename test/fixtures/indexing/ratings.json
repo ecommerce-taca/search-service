@@ -1,0 +1,40 @@
+[
+  {
+    "event_id": "01912f70-rat-001",
+    "schema_version": 1,
+    "event_type": "rating.aggregate.updated",
+    "occurred_at": "2026-10-14T12:00:00Z",
+    "aggregate_type": "RATING",
+    "aggregate_id": "prod-001-published",
+    "version": 1,
+    "payload": {
+      "product_id": "prod-001-published",
+      "avg": 4.8,
+      "count": 120,
+      "distribution": {
+        "5": 100,
+        "4": 15,
+        "3": 5,
+        "2": 0,
+        "1": 0
+      }
+    }
+  },
+  {
+    "event_id": "01912f70-rat-002-older",
+    "schema_version": 1,
+    "event_type": "rating.aggregate.updated",
+    "occurred_at": "2026-10-14T11:00:00Z",
+    "aggregate_type": "RATING",
+    "aggregate_id": "prod-001-published",
+    "version": 1,
+    "payload": {
+      "product_id": "prod-001-published",
+      "avg": 3.0,
+      "count": 10,
+      "distribution": {
+        "3": 10
+      }
+    }
+  }
+]
