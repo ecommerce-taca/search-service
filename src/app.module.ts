@@ -1,4 +1,5 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
+import { RequestContextMiddleware } from './common/context/request-context.middleware';
 import { AppConfigModule } from './config/config.module';
 import { ObservabilityModule } from './observability/observability.module';
 import { HealthModule } from './health/health.module';
@@ -22,4 +23,8 @@ import { SecurityModule } from './security/security.module';
     SecurityModule,
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(RequestContextMiddleware).forRoutes('*');
+  }
+}
