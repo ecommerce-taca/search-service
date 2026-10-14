@@ -1,3 +1,4 @@
+import { VisibilityStatus } from '../../common/enums';
 import { DomainEvent } from '../../event-consumer/interfaces';
 import { ProductSearchDocument } from '../interfaces';
 import { VariantAggregator } from './variant-aggregator';
@@ -24,7 +25,7 @@ describe('VariantAggregator', () => {
     rating_count: 0,
     attributes: {},
     variant_skus: {},
-    visibility_status: 'PUBLISHED' as any,
+    visibility_status: VisibilityStatus.PUBLISHED,
     source_version: 1,
     source_event_id: 'evt-1',
     indexed_at: '2026-10-14T10:00:00.000Z',

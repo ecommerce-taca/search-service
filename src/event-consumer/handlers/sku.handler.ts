@@ -13,7 +13,10 @@ import {
   INDEX_WRITER,
   ProductSearchDocument,
 } from '../../product-index/interfaces';
-import { VariantAggregator } from '../../product-index/sku/variant-aggregator';
+import {
+  SkuEventPayload,
+  VariantAggregator,
+} from '../../product-index/sku/variant-aggregator';
 import { DomainEvent } from '../interfaces';
 
 @Injectable()
@@ -28,7 +31,7 @@ export class SkuHandler {
   ) {}
 
   async handle(evt: DomainEvent<unknown>): Promise<void> {
-    const payload = (evt.payload || {}) as Record<string, any>;
+    const payload = (evt.payload || {}) as SkuEventPayload;
     const skuId = payload.sku_id || evt.aggregate_id;
     const productId = payload.product_id;
 

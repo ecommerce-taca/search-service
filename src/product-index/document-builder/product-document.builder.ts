@@ -217,7 +217,8 @@ export class ProductDocumentBuilder implements IProductDocumentBuilder {
 
     const doc: ProductSearchDocument = {
       product_id: productId,
-      shop_id: payload.shop_id || payload.shop?.shop_id || current?.shop_id || '',
+      shop_id:
+        payload.shop_id || payload.shop?.shop_id || current?.shop_id || '',
       slug: payload.slug || current?.slug || '',
       title,
       title_exact: title,
@@ -317,12 +318,14 @@ export class ProductDocumentBuilder implements IProductDocumentBuilder {
       doc.cover_url = payload.cover_url;
     }
 
-    const titleForSuggest = payload.title !== undefined ? payload.title : current?.title;
-    const brandForSuggest = payload.brand !== undefined ? payload.brand : current?.brand;
+    const titleForSuggest =
+      payload.title !== undefined ? payload.title : current?.title;
+    const brandForSuggest =
+      payload.brand !== undefined ? payload.brand : current?.brand;
     if (payload.title !== undefined || payload.brand !== undefined) {
       doc.suggest = {
-        input: [titleForSuggest, brandForSuggest].filter((item): item is string =>
-          Boolean(item),
+        input: [titleForSuggest, brandForSuggest].filter(
+          (item): item is string => Boolean(item),
         ),
       };
     }

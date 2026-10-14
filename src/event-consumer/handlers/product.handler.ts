@@ -17,6 +17,7 @@ import {
   PRODUCT_DOCUMENT_BUILDER,
   ProductSearchDocument,
 } from '../../product-index/interfaces';
+import { ProductEventPayload } from '../../product-index/document-builder/product-document.builder';
 import { DomainEvent } from '../interfaces';
 
 @Injectable()
@@ -34,7 +35,7 @@ export class ProductHandler {
   ) {}
 
   async handle(evt: DomainEvent<unknown>): Promise<void> {
-    const payload = (evt.payload || {}) as Record<string, any>;
+    const payload = (evt.payload || {}) as ProductEventPayload;
     const productId = evt.aggregate_id || payload.product_id;
 
     if (!productId) {

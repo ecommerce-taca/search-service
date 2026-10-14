@@ -11,11 +11,7 @@ import { ConsumerState } from '../../common/enums';
 import { AppConfigService } from '../../config/config.service';
 import { ELASTICSEARCH_CLIENT } from '../../product-index/elasticsearch.module';
 import { KAFKA_CLIENT } from '../kafka.module';
-import {
-  ConsumerStatus,
-  CONSUMER_STATUS_PROVIDER,
-  IConsumerStatusProvider,
-} from '../interfaces';
+import { ConsumerStatus, IConsumerStatusProvider } from '../interfaces';
 
 @Injectable()
 export class ConsumerStatusService implements IConsumerStatusProvider {
@@ -66,10 +62,7 @@ export class ConsumerStatusService implements IConsumerStatusProvider {
 
   async getStatus(): Promise<ConsumerStatus> {
     const now = Date.now();
-    if (
-      this.cachedStatus &&
-      now - this.lastFetchedTime < this.CACHE_TTL_MS
-    ) {
+    if (this.cachedStatus && now - this.lastFetchedTime < this.CACHE_TTL_MS) {
       return this.cachedStatus;
     }
 
@@ -94,10 +87,7 @@ export class ConsumerStatusService implements IConsumerStatusProvider {
       state = ConsumerState.PAUSED;
     } else if (dlqCount > 0) {
       state = ConsumerState.DLQ;
-    } else if (
-      totalLag > 0 ||
-      maxLagSeconds > EVENT_MAX_LAG_ALERT_S
-    ) {
+    } else if (totalLag > 0 || maxLagSeconds > EVENT_MAX_LAG_ALERT_S) {
       state = ConsumerState.DEGRADED;
     } else {
       state = ConsumerState.RUNNING;
@@ -178,7 +168,9 @@ export class ConsumerStatusService implements IConsumerStatusProvider {
             });
 
             let topicLag = 0;
-            const consumerTopic = consumerOffsets.find((t) => t.topic === topic);
+            const consumerTopic = consumerOffsets.find(
+              (t) => t.topic === topic,
+            );
 
             for (const partitionOffset of topicOffsets) {
               const partitionId = partitionOffset.partition;

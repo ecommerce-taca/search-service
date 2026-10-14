@@ -12,6 +12,20 @@ import {
 } from '../../product-index/interfaces';
 import { DomainEvent } from '../interfaces';
 
+export interface CatalogEventPayload {
+  product_id?: string;
+  primary_category_id?: string;
+  category_id?: string;
+  category_ids?: string[];
+  category_path?: string[];
+  media?: Array<{ url: string; alt?: string; order?: number }>;
+  cover_url?: string;
+  shop?: { shop_id: string; name: string };
+  shop_id?: string;
+  name?: string;
+  shop_name?: string;
+}
+
 @Injectable()
 export class CatalogHandler {
   private readonly logger = new Logger(CatalogHandler.name);
@@ -24,7 +38,7 @@ export class CatalogHandler {
   ) {}
 
   async handle(evt: DomainEvent<unknown>): Promise<void> {
-    const payload = (evt.payload || {}) as Record<string, any>;
+    const payload = (evt.payload || {}) as CatalogEventPayload;
     const productId = evt.aggregate_id || payload.product_id;
 
     if (!productId) {
@@ -46,7 +60,8 @@ export class CatalogHandler {
 
         let categoryIds: string[] = [];
         if (primaryCatId && typeof primaryCatId === 'string') {
-          categoryIds = await this.categoryProjection.resolvePathIds(primaryCatId);
+          categoryIds =
+            await this.categoryProjection.resolvePathIds(primaryCatId);
         } else if (Array.isArray(payload.category_ids)) {
           categoryIds = payload.category_ids;
         }
@@ -88,7 +103,14 @@ export class CatalogHandler {
       }
 
       case 'product.shop_snapshot_updated': {
-        const shop = payload.shop || (payload.shop_id ? { shop_id: payload.shop_id, name: payload.name || payload.shop_name || '' } : undefined);
+        const shop =
+          payload.shop ||
+          (payload.shop_id
+            ? {
+                shop_id: payload.shop_id,
+                name: payload.name || payload.shop_name || '',
+              }
+            : undefined);
         if (!shop) {
           this.logger.debug(
             `product.shop_snapshot_updated on ${productId} has no valid shop snapshot`,

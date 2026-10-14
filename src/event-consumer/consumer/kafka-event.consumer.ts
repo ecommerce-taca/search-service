@@ -87,7 +87,9 @@ export class KafkaEventConsumer
     }
 
     if (!this.kafka) {
-      this.logger.warn('Kafka client is not configured; skipping consumer start.');
+      this.logger.warn(
+        'Kafka client is not configured; skipping consumer start.',
+      );
       this.consumerStatusService.setConsumerState(false);
       return;
     }
@@ -204,7 +206,10 @@ export class KafkaEventConsumer
   async processMessage(
     topic: string,
     message: {
-      headers?: Record<string, Buffer | string | undefined | (Buffer | string)[]>;
+      headers?: Record<
+        string,
+        Buffer | string | undefined | (Buffer | string)[]
+      >;
       value: Buffer | string | null;
       offset: string;
     },
@@ -251,13 +256,17 @@ export class KafkaEventConsumer
           : String(message.value || '{}');
         evt = JSON.parse(rawValue) as DomainEvent<unknown>;
       } catch (parseErr) {
-        this.logger.error(`Failed to parse event JSON on topic ${topic}: ${parseErr}`);
+        this.logger.error(
+          `Failed to parse event JSON on topic ${topic}: ${parseErr}`,
+        );
         this.eventsProcessedTotal.labels(topic, 'failed').inc();
         return null;
       }
 
       if (!evt || !evt.event_id) {
-        this.logger.warn(`Skipping event with missing event_id on topic ${topic}`);
+        this.logger.warn(
+          `Skipping event with missing event_id on topic ${topic}`,
+        );
         this.eventsProcessedTotal.labels(topic, 'skipped').inc();
         return null;
       }
@@ -285,7 +294,8 @@ export class KafkaEventConsumer
           (err instanceof errors.ResponseError ||
             (err as { name?: string })?.name === 'ResponseError') &&
           ((err as { statusCode?: number })?.statusCode === 409 ||
-            (err as { meta?: { statusCode?: number } })?.meta?.statusCode === 409)
+            (err as { meta?: { statusCode?: number } })?.meta?.statusCode ===
+              409)
         ) {
           // Already recorded => duplicate
           this.eventsProcessedTotal.labels(topic, 'duplicate').inc();
@@ -300,7 +310,7 @@ export class KafkaEventConsumer
       }
 
       // Retry 3 times with 2s backoff
-      let lastError: any = null;
+      let lastError: unknown = null;
       let success = false;
 
       for (let attempt = 1; attempt <= EVENT_RETRY_COUNT; attempt++) {
@@ -354,13 +364,18 @@ export class KafkaEventConsumer
   private async handleDeadLetter(
     topic: string,
     evt: DomainEvent<unknown>,
-    error: any,
+    error: unknown,
     ctx: RequestContextData,
   ): Promise<void> {
     const errorCode =
       error instanceof SearchException
         ? error.code
-        : error?.code || SearchErrorCode.SEARCH_INTERNAL_ERROR;
+        : typeof error === 'object' &&
+            error !== null &&
+            'code' in error &&
+            typeof (error as Record<string, unknown>).code === 'string'
+          ? ((error as Record<string, unknown>).code as string)
+          : SearchErrorCode.SEARCH_INTERNAL_ERROR;
 
     const consumerStateIndex = getConsumerStateIndex(
       this.configService.esIndexPrefix,
@@ -381,7 +396,9 @@ export class KafkaEventConsumer
         },
       });
     } catch (err) {
-      this.logger.error(`Failed to record FAILED state for ${evt.event_id}: ${err}`);
+      this.logger.error(
+        `Failed to record FAILED state for ${evt.event_id}: ${err}`,
+      );
     }
 
     // Produce redacted envelope to DLQ topic
@@ -413,7 +430,9 @@ export class KafkaEventConsumer
             },
           ],
         });
-        this.logger.log(`Produced redacted event ${evt.event_id} to DLQ topic ${dlqTopic}`);
+        this.logger.log(
+          `Produced redacted event ${evt.event_id} to DLQ topic ${dlqTopic}`,
+        );
       } catch (err) {
         this.logger.error(`Failed producing to DLQ topic ${dlqTopic}: ${err}`);
       }

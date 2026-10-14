@@ -1,4 +1,5 @@
 import { Client } from '@elastic/elasticsearch';
+import { VisibilityStatus } from '../../common/enums';
 import { ProductSearchDocument } from '../interfaces';
 import { EsIndexWriter } from './es-index-writer';
 
@@ -14,7 +15,10 @@ describe('EsIndexWriter', () => {
     writer = new EsIndexWriter(clientMock as unknown as Client);
   });
 
-  const createDummyDoc = (id: string, version: number): ProductSearchDocument => ({
+  const createDummyDoc = (
+    id: string,
+    version: number,
+  ): ProductSearchDocument => ({
     product_id: id,
     shop_id: 'shop-1',
     slug: `slug-${id}`,
@@ -28,7 +32,7 @@ describe('EsIndexWriter', () => {
     rating_avg: 0,
     rating_count: 0,
     attributes: {},
-    visibility_status: 'PUBLISHED' as any,
+    visibility_status: VisibilityStatus.PUBLISHED,
     source_version: version,
     source_event_id: `evt-${id}`,
     indexed_at: '2026-10-14T10:00:00.000Z',
@@ -42,9 +46,7 @@ describe('EsIndexWriter', () => {
 
     (clientMock.bulk as jest.Mock).mockResolvedValue({
       errors: false,
-      items: [
-        { index: { status: 200 } },
-      ],
+      items: [{ index: { status: 200 } }],
     });
 
     await writer.bulkUpsert('products-read', docs);
@@ -72,10 +74,7 @@ describe('EsIndexWriter', () => {
   });
 
   it('treats 409 version conflict as skipped in bulkUpsertWithSummary', async () => {
-    const docs = [
-      createDummyDoc('prod-1', 1),
-      createDummyDoc('prod-2', 2),
-    ];
+    const docs = [createDummyDoc('prod-1', 1), createDummyDoc('prod-2', 2)];
 
     (clientMock.bulk as jest.Mock).mockResolvedValue({
       errors: true,
@@ -86,7 +85,8 @@ describe('EsIndexWriter', () => {
             status: 409,
             error: {
               type: 'version_conflict_engine_exception',
-              reason: 'version conflict, document version [2] is higher than current [1]',
+              reason:
+                'version conflict, document version [2] is higher than current [1]',
             },
           },
         },
@@ -102,9 +102,7 @@ describe('EsIndexWriter', () => {
   });
 
   it('executes bulkPartialUpdate with update descriptors', async () => {
-    const updates = [
-      { id: 'prod-1', doc: { title: 'Updated Title' } },
-    ];
+    const updates = [{ id: 'prod-1', doc: { title: 'Updated Title' } }];
 
     (clientMock.bulk as jest.Mock).mockResolvedValue({
       errors: false,
@@ -142,7 +140,10 @@ describe('EsIndexWriter', () => {
       ],
     });
 
-    const versions = await writer.getCurrentVersions('products-read', ['prod-1', 'prod-2']);
+    const versions = await writer.getCurrentVersions('products-read', [
+      'prod-1',
+      'prod-2',
+    ]);
     expect(versions.size).toBe(1);
     expect(versions.get('prod-1')).toBe(10);
     expect(versions.has('prod-2')).toBe(false);

@@ -58,7 +58,8 @@ export class VariantAggregator {
     }
 
     // Filter and sanitize attributes
-    const rawAttrs = payload.attributes || (existingSku ? existingSku.attributes : {});
+    const rawAttrs =
+      payload.attributes || (existingSku ? existingSku.attributes : {});
     const sanitizedAttrs: Record<string, string> = {};
 
     for (const [key, val] of Object.entries(rawAttrs)) {
@@ -74,7 +75,8 @@ export class VariantAggregator {
       }
     }
 
-    const newStatus = payload.status || (existingSku ? existingSku.status : 'INACTIVE');
+    const newStatus =
+      payload.status || (existingSku ? existingSku.status : 'INACTIVE');
 
     currentVariantSkus[skuId] = {
       status: newStatus.toUpperCase(),

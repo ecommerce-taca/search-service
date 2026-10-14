@@ -139,23 +139,22 @@ export class CategoryProjectionWriter {
     let searchAfter: unknown = undefined;
 
     while (true) {
-      const searchParams: Record<string, unknown> = {
-        index: productsAlias,
-        size: ES_BULK_BATCH_SIZE,
-        sort: [{ product_id: 'asc' }],
-        query: {
-          term: { category_ids: categoryId },
+      const searchRes = await this.client.search<
+        Pick<ProductSearchDocument, 'product_id' | 'category_ids'>
+      >(
+        {
+          index: productsAlias,
+          size: ES_BULK_BATCH_SIZE,
+          sort: [{ product_id: 'asc' }],
+          query: {
+            term: { category_ids: categoryId },
+          },
+          _source: ['product_id', 'category_ids'],
+          search_after: searchAfter as (string | number)[] | undefined,
         },
-        _source: ['product_id', 'category_ids'],
-        request_timeout: ES_REQUEST_TIMEOUT_MS,
-      };
-
-      if (searchAfter) {
-        searchParams.search_after = searchAfter;
-      }
-
-      const searchRes = await this.client.search<Pick<ProductSearchDocument, 'product_id' | 'category_ids'>>(
-        searchParams as any,
+        {
+          requestTimeout: ES_REQUEST_TIMEOUT_MS,
+        },
       );
 
       const hits = searchRes.hits?.hits || [];
@@ -163,7 +162,10 @@ export class CategoryProjectionWriter {
         break;
       }
 
-      const updates: Array<{ id: string; doc: Partial<ProductSearchDocument> }> = [];
+      const updates: Array<{
+        id: string;
+        doc: Partial<ProductSearchDocument>;
+      }> = [];
 
       for (const hit of hits) {
         if (!hit._id || !hit._source) {

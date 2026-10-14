@@ -105,7 +105,9 @@ describe('KafkaEventConsumer', () => {
 
     const message = {
       headers: {
-        traceparent: Buffer.from('00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01'),
+        traceparent: Buffer.from(
+          '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01',
+        ),
         'x-request-id': Buffer.from('req-123'),
       },
       value: Buffer.from(JSON.stringify(rawEvent)),
@@ -154,7 +156,10 @@ describe('KafkaEventConsumer', () => {
 
   it('retries 3 times then produces redacted envelope to DLQ on failure', async () => {
     // initialize producer
-    (consumer as any).producer = producerMock;
+    Object.defineProperty(consumer, 'producer', {
+      value: producerMock,
+      writable: true,
+    });
 
     const rawEvent = {
       event_id: 'evt-poison',
@@ -175,7 +180,9 @@ describe('KafkaEventConsumer', () => {
 
     const message = {
       headers: {
-        traceparent: Buffer.from('00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01'),
+        traceparent: Buffer.from(
+          '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01',
+        ),
         'x-request-id': Buffer.from('req-poison-123'),
       },
       value: Buffer.from(JSON.stringify(rawEvent)),
@@ -183,7 +190,12 @@ describe('KafkaEventConsumer', () => {
     };
 
     // Override delay so test doesn't wait 4s
-    jest.spyOn(consumer as any, 'delay').mockImplementation(() => Promise.resolve());
+    jest
+      .spyOn(
+        consumer as unknown as { delay: (ms: number) => Promise<void> },
+        'delay',
+      )
+      .mockImplementation(() => Promise.resolve());
 
     await consumer.processMessage('test-product.events.v1', message);
 
@@ -240,7 +252,9 @@ describe('KafkaEventConsumer', () => {
 
     const message = {
       headers: {
-        traceparent: Buffer.from('00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01'),
+        traceparent: Buffer.from(
+          '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01',
+        ),
         'x-request-id': Buffer.from('my-custom-req-id'),
       },
       value: Buffer.from(JSON.stringify(rawEvent)),

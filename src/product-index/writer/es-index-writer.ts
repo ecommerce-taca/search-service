@@ -2,11 +2,7 @@ import { Client } from '@elastic/elasticsearch';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ES_BULK_BATCH_SIZE } from '../../common/constants';
 import { ELASTICSEARCH_CLIENT } from '../elasticsearch.module';
-import {
-  IIndexWriter,
-  INDEX_WRITER,
-  ProductSearchDocument,
-} from '../interfaces';
+import { IIndexWriter, ProductSearchDocument } from '../interfaces';
 
 export interface BulkOperationSummary {
   applied: number;
@@ -14,13 +10,20 @@ export interface BulkOperationSummary {
   failed: number;
 }
 
+export interface BulkActionResponse {
+  status?: number;
+  error?: {
+    type?: string;
+    reason?: string;
+    status?: number;
+  };
+}
+
 @Injectable()
 export class EsIndexWriter implements IIndexWriter {
   private readonly logger = new Logger(EsIndexWriter.name);
 
-  constructor(
-    @Inject(ELASTICSEARCH_CLIENT) private readonly client: Client,
-  ) {}
+  constructor(@Inject(ELASTICSEARCH_CLIENT) private readonly client: Client) {}
 
   /**
    * Bulk upserts product documents with optimistic version guard:
@@ -135,7 +138,9 @@ export class EsIndexWriter implements IIndexWriter {
 
     const chunks = this.chunkArray(uniqueIds, ES_BULK_BATCH_SIZE);
     for (const chunk of chunks) {
-      const response = await this.client.mget<Pick<ProductSearchDocument, 'source_version'>>({
+      const response = await this.client.mget<
+        Pick<ProductSearchDocument, 'source_version'>
+      >({
         index,
         ids: chunk,
         _source: ['source_version'],
@@ -157,7 +162,7 @@ export class EsIndexWriter implements IIndexWriter {
   }
 
   private tallyBulkItems(
-    items: Array<Record<string, any>> | undefined,
+    items: Array<Record<string, BulkActionResponse>> | undefined,
     summary: BulkOperationSummary,
   ): void {
     if (!items) {
@@ -165,8 +170,7 @@ export class EsIndexWriter implements IIndexWriter {
     }
 
     for (const item of items) {
-      const action =
-        item.index || item.create || item.update || item.delete;
+      const action = item.index || item.create || item.update || item.delete;
       if (!action) {
         continue;
       }
@@ -182,7 +186,9 @@ export class EsIndexWriter implements IIndexWriter {
         summary.skipped++;
       } else if (error || (status >= 400 && status !== 404)) {
         summary.failed++;
-        this.logger.warn(`ES bulk item failed with status ${status}: ${error?.reason || error?.type || 'error'}`);
+        this.logger.warn(
+          `ES bulk item failed with status ${status}: ${error?.reason || error?.type || 'error'}`,
+        );
       } else {
         summary.applied++;
       }

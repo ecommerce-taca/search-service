@@ -9,11 +9,16 @@ import { SearchErrorCode } from '../../common/errors/error-codes';
 import { SearchException } from '../../common/errors/search.exception';
 import { AppConfigService } from '../../config/config.service';
 import { ELASTICSEARCH_CLIENT } from '../../product-index/elasticsearch.module';
-import {
-  IIndexWriter,
-  INDEX_WRITER,
-} from '../../product-index/interfaces';
+import { IIndexWriter, INDEX_WRITER } from '../../product-index/interfaces';
 import { DomainEvent } from '../interfaces';
+
+export interface RatingEventPayload {
+  product_id?: string;
+  avg?: number;
+  rating_avg?: number;
+  count?: number;
+  rating_count?: number;
+}
 
 @Injectable()
 export class RatingHandler {
@@ -26,7 +31,7 @@ export class RatingHandler {
   ) {}
 
   async handle(evt: DomainEvent<unknown>): Promise<void> {
-    const payload = (evt.payload || {}) as Record<string, any>;
+    const payload = (evt.payload || {}) as RatingEventPayload;
     const productId = payload.product_id || evt.aggregate_id;
 
     if (!productId) {
@@ -69,14 +74,12 @@ export class RatingHandler {
         return;
       }
     } catch (err: unknown) {
-      if (
-        !(
-          (err instanceof errors.ResponseError ||
-            (err as { name?: string })?.name === 'ResponseError') &&
-          ((err as { statusCode?: number })?.statusCode === 404 ||
-            (err as { meta?: { statusCode?: number } })?.meta?.statusCode === 404)
-        )
-      ) {
+      if (!(
+        (err instanceof errors.ResponseError ||
+          (err as { name?: string })?.name === 'ResponseError') &&
+        ((err as { statusCode?: number })?.statusCode === 404 ||
+          (err as { meta?: { statusCode?: number } })?.meta?.statusCode === 404)
+      )) {
         throw err;
       }
     }
