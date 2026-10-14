@@ -12,6 +12,7 @@ describe('IndexBootstrapService', () => {
     updateAliases: jest.Mock;
     getAlias: jest.Mock;
     delete: jest.Mock;
+    putMapping: jest.Mock;
   };
   let mockConfigService: Partial<AppConfigService>;
 
@@ -23,6 +24,7 @@ describe('IndexBootstrapService', () => {
       updateAliases: jest.fn(),
       getAlias: jest.fn(),
       delete: jest.fn(),
+      putMapping: jest.fn().mockResolvedValue({ acknowledged: true }),
     };
 
     mockClient = {
@@ -139,5 +141,35 @@ describe('IndexBootstrapService', () => {
     const result = await service.bootstrap();
     expect(result.aliasCreated).toBe(true);
     expect(result.consumerStateCreated).toBe(false);
+  });
+
+  it('adds new fields to internal indices that already exist, never to the products index', async () => {
+    mockIndices.existsAlias.mockResolvedValue(true);
+    mockIndices.exists.mockResolvedValue(true);
+    mockIndices.getAlias.mockResolvedValue({
+      'test-products-v1-20261014100000': {
+        aliases: { 'test-products-read': {} },
+      },
+    });
+
+    await service.bootstrap();
+
+    const syncedIndices = mockIndices.putMapping.mock.calls.map(
+      ([req]: [{ index: string }]) => req.index,
+    );
+    expect(syncedIndices).toEqual(
+      expect.arrayContaining([
+        'test-search-consumer-state',
+        'test-search-reindex-jobs',
+        'test-search-categories',
+      ]),
+    );
+    expect(syncedIndices).not.toContain('test-products-v1-20261014100000');
+    const reindexJobsCall = mockIndices.putMapping.mock.calls.find(
+      ([req]: [{ index: string }]) => req.index === 'test-search-reindex-jobs',
+    ) as [{ properties: Record<string, unknown> }];
+    expect(reindexJobsCall[0].properties).toHaveProperty('total_estimate', {
+      type: 'long',
+    });
   });
 });

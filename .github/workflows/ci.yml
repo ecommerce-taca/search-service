@@ -1,36 +1,66 @@
 name: CI
 
+# Trigger: mọi PR + push lên main/develop đều chạy test & build.
+# Push image: main → latest + <sha>; develop → develop + develop-<sha> (môi trường K8S dev).
 on:
   push:
-    branches: ['main', 'develop', 'feature/**']
+    branches: [main, develop]
   pull_request:
-    branches: ['main', 'develop']
+    branches: [main, develop]
 
 jobs:
-  build-and-test:
+  test:
+    name: Lint · Build · Unit · E2E
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 26
-          cache: 'npm'
+          cache: npm
 
-      - name: Install dependencies
-        run: npm ci
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - run: npm test
+      # e2e không cần cluster (ES client được mock)
+      - run: npm run test:e2e
 
-      - name: Run lint
-        run: npm run lint
+  docker:
+    name: Build & Push Docker image
+    needs: test
+    # Push image chỉ khi push lên main (latest + sha) hoặc develop (develop + develop-sha, dùng cho K8S dev).
+    # PR không push để tránh image tràn Docker Hub.
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: Run build
-        run: npm run build
+      - uses: docker/setup-buildx-action@v3
 
-      - name: Run unit tests
-        run: npm test
+      # Đăng nhập Docker Hub bằng secret (không hardcode credential)
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Run e2e tests
-        run: npm run test:e2e
+      # main → latest + <sha>; develop → develop + develop-<sha> (để rollback được theo SHA)
+      - name: Compute image tags
+        id: tags
+        env:
+          IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/search-service
+        run: |
+          if [ "${GITHUB_REF}" = "refs/heads/main" ]; then
+            printf 'list<<EOF\n%s:latest\n%s:%s\nEOF\n' "$IMAGE" "$IMAGE" "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          else
+            printf 'list<<EOF\n%s:develop\n%s:develop-%s\nEOF\n' "$IMAGE" "$IMAGE" "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.tags.outputs.list }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
