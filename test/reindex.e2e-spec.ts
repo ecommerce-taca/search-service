@@ -10,6 +10,7 @@ import { CONSUMER_STATUS_PROVIDER } from '../src/event-consumer/interfaces';
 import { ELASTICSEARCH_CLIENT } from '../src/product-index/elasticsearch.module';
 import { IndexBootstrapService } from '../src/product-index/index-bootstrap.service';
 import { ReindexJobDocument } from '../src/reindex/job.repository';
+import { KafkaReplaySource } from '../src/reindex/kafka-replay.source';
 import { ReindexErrorCode } from '../src/reindex/reindex.service';
 
 describe('Reindex & Admin (e2e)', () => {
@@ -215,6 +216,12 @@ describe('Reindex & Admin (e2e)', () => {
       .useValue(mockEsClient)
       .overrideProvider(Client)
       .useValue(mockEsClient)
+      .overrideProvider(KafkaReplaySource)
+      .useValue({
+        // e2e needs no cluster: never open a real Kafka connection from background jobs
+        copy: jest.fn().mockResolvedValue(undefined),
+        resolveReplayStartingOffsets: jest.fn().mockResolvedValue({}),
+      })
       .overrideProvider(CONSUMER_STATUS_PROVIDER)
       .useValue({
         getStatus: jest.fn().mockResolvedValue({
