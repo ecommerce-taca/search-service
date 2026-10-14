@@ -13,15 +13,13 @@ import { SortOption } from '../src/common/enums';
 import { AppConfigService } from '../src/config/config.service';
 import { EsCategoryProjection } from '../src/product-index/category-projection.service';
 import { ELASTICSEARCH_CLIENT } from '../src/product-index/elasticsearch.module';
-import {
-  CATEGORY_PROJECTION,
-  ProductSearchDocument,
-} from '../src/product-index/interfaces';
+import { CATEGORY_PROJECTION } from '../src/product-index/interfaces';
 import {
   PRODUCTS_INDEX_MAPPING_V1,
   PRODUCTS_INDEX_SETTINGS_V1,
   SEARCH_CATEGORIES_MAPPING_V1,
 } from '../src/product-index/mappings';
+import { SearchProductsQueryDto } from '../src/search-query/dto/search-products.query';
 import { SearchRequestBuilder } from '../src/search-query/es/search-request.builder';
 import { QueryParser } from '../src/search-query/query-parser';
 import { SearchResultMapper } from '../src/search-query/result.mapper';
@@ -38,7 +36,11 @@ describe('SearchQuery (Integration on real ES cluster)', () => {
     ? `${process.env.ES_INDEX_PREFIX}${rand}-`
     : `it-search-query-${rand}-`;
 
-  const productsIndex = getVersionedIndexName(1, formatUtcTimestamp(), testPrefix);
+  const productsIndex = getVersionedIndexName(
+    1,
+    formatUtcTimestamp(),
+    testPrefix,
+  );
   const productsAlias = getProductsAlias(testPrefix);
   const categoriesIndex = getSearchCategoriesIndex(testPrefix);
 
@@ -135,7 +137,7 @@ describe('SearchQuery (Integration on real ES cluster)', () => {
 
     // Seed products
     for (const prod of fixtureData.products) {
-      const doc: Record<string, any> = {
+      const doc: Record<string, unknown> = {
         ...prod,
         shop: prod.shop || {
           shop_id: prod.shop_id,
@@ -160,7 +162,10 @@ describe('SearchQuery (Integration on real ES cluster)', () => {
   afterAll(async () => {
     try {
       if (await client.indices.existsAlias({ name: productsAlias })) {
-        await client.indices.deleteAlias({ index: productsIndex, name: productsAlias });
+        await client.indices.deleteAlias({
+          index: productsIndex,
+          name: productsAlias,
+        });
       }
       if (await client.indices.exists({ index: productsIndex })) {
         await client.indices.delete({ index: productsIndex });
@@ -169,7 +174,10 @@ describe('SearchQuery (Integration on real ES cluster)', () => {
         await client.indices.delete({ index: categoriesIndex });
       }
     } catch (cleanupErr) {
-      console.warn('Error during ES cleanup in search-query.int-spec:', cleanupErr);
+      console.warn(
+        'Error during ES cleanup in search-query.int-spec:',
+        cleanupErr,
+      );
     }
 
     await client.close();
@@ -177,7 +185,9 @@ describe('SearchQuery (Integration on real ES cluster)', () => {
   });
 
   it('SQ-I-01: matches unaccented Vietnamese "ao khoac" returning prod-001 and prod-002 via vi folding', async () => {
-    const res = await service.search(parser.parse({ q: 'ao khoac' } as any));
+    const res = await service.search(
+      parser.parse({ q: 'ao khoac' } as unknown as SearchProductsQueryDto),
+    );
     expect(res.meta.total).toBe(2);
     const ids = res.data.map((p) => p.product_id);
     expect(ids).toContain('prod-001');
@@ -185,7 +195,9 @@ describe('SearchQuery (Integration on real ES cluster)', () => {
   });
 
   it('SQ-I-02: matches accented Vietnamese "Áo khoác" returning prod-001 and prod-002', async () => {
-    const res = await service.search(parser.parse({ q: 'Áo khoác' } as any));
+    const res = await service.search(
+      parser.parse({ q: 'Áo khoác' } as unknown as SearchProductsQueryDto),
+    );
     expect(res.meta.total).toBe(2);
     const ids = res.data.map((p) => p.product_id);
     expect(ids).toContain('prod-001');
@@ -193,7 +205,9 @@ describe('SearchQuery (Integration on real ES cluster)', () => {
   });
 
   it('SQ-I-03: matches uppercase unaccented "AO KHOAC" returning prod-001 and prod-002', async () => {
-    const res = await service.search(parser.parse({ q: 'AO KHOAC' } as any));
+    const res = await service.search(
+      parser.parse({ q: 'AO KHOAC' } as unknown as SearchProductsQueryDto),
+    );
     expect(res.meta.total).toBe(2);
     const ids = res.data.map((p) => p.product_id);
     expect(ids).toContain('prod-001');
@@ -201,7 +215,9 @@ describe('SearchQuery (Integration on real ES cluster)', () => {
   });
 
   it('SQ-I-04: matches unaccented "dien thoai" returning 4 phones (prod-003..006)', async () => {
-    const res = await service.search(parser.parse({ q: 'dien thoai' } as any));
+    const res = await service.search(
+      parser.parse({ q: 'dien thoai' } as unknown as SearchProductsQueryDto),
+    );
     expect(res.meta.total).toBe(4);
     const ids = res.data.map((p) => p.product_id);
     expect(ids).toEqual(
@@ -210,23 +226,33 @@ describe('SearchQuery (Integration on real ES cluster)', () => {
   });
 
   it('SQ-I-05: NEVER returns HIDDEN product prod-009 when searching "da lon" or "Áo khoác da lộn"', async () => {
-    const res1 = await service.search(parser.parse({ q: 'da lon' } as any));
+    const res1 = await service.search(
+      parser.parse({ q: 'da lon' } as unknown as SearchProductsQueryDto),
+    );
     expect(res1.meta.total).toBe(0);
     expect(res1.data).toHaveLength(0);
 
-    const res2 = await service.search(parser.parse({ q: 'Áo khoác da lộn' } as any));
+    const res2 = await service.search(
+      parser.parse({
+        q: 'Áo khoác da lộn',
+      } as unknown as SearchProductsQueryDto),
+    );
     expect(res2.meta.total).toBe(0);
     expect(res2.data).toHaveLength(0);
   });
 
   it('SQ-I-06: NEVER returns DELETED product prod-010 when searching "iPhone 14 Pro"', async () => {
-    const res = await service.search(parser.parse({ q: 'iPhone 14 Pro' } as any));
+    const res = await service.search(
+      parser.parse({ q: 'iPhone 14 Pro' } as unknown as SearchProductsQueryDto),
+    );
     expect(res.meta.total).toBe(0);
     expect(res.data).toHaveLength(0);
   });
 
   it('SQ-I-07: strictly excludes HIDDEN and DELETED docs from all facet aggregations', async () => {
-    const res = await service.search(parser.parse({} as any));
+    const res = await service.search(
+      parser.parse({} as unknown as SearchProductsQueryDto),
+    );
     const facets = res.meta.facets!;
 
     // Apple count = 3 (prod-003, 004, 007; NOT prod-010 which is DELETED)
@@ -238,33 +264,49 @@ describe('SearchQuery (Integration on real ES cluster)', () => {
     expect(tacaBrand?.count).toBe(1);
 
     // Price bucket [0, 5000000) count = 3 (prod-001, 002, 006; NOT prod-009)
-    const lowBucket = facets.price.find((b) => b.min === 0 && b.max === 5000000);
+    const lowBucket = facets.price.find(
+      (b) => b.min === 0 && b.max === 5000000,
+    );
     expect(lowBucket?.count).toBe(3);
   });
 
   it('SQ-I-08: returns empty array data=[] and total=0 for non-existent query (not 404)', async () => {
-    const res = await service.search(parser.parse({ q: 'khongtontaicainay123456789' } as any));
+    const res = await service.search(
+      parser.parse({
+        q: 'khongtontaicainay123456789',
+      } as unknown as SearchProductsQueryDto),
+    );
     expect(res.data).toEqual([]);
     expect(res.meta.total).toBe(0);
     expect(res.meta.total_pages).toBe(0);
   });
 
   it('SQ-I-09: returns all 8 PUBLISHED products in browse mode without q', async () => {
-    const res = await service.search(parser.parse({} as any));
+    const res = await service.search(
+      parser.parse({} as unknown as SearchProductsQueryDto),
+    );
     expect(res.meta.total).toBe(8);
     expect(res.meta.total_pages).toBe(1);
     expect(res.data).toHaveLength(8);
   });
 
   it('SQ-I-10: filters by category_id=cat-outerwear returning prod-001 and prod-002', async () => {
-    const res = await service.search(parser.parse({ category_id: 'cat-outerwear' } as any));
+    const res = await service.search(
+      parser.parse({
+        category_id: 'cat-outerwear',
+      } as unknown as SearchProductsQueryDto),
+    );
     expect(res.meta.total).toBe(2);
     const ids = res.data.map((p) => p.product_id);
     expect(ids).toEqual(expect.arrayContaining(['prod-001', 'prod-002']));
   });
 
   it('SQ-I-11: filters by shop_id=shop-001 returning prod-001 and prod-002', async () => {
-    const res = await service.search(parser.parse({ shop_id: 'shop-001' } as any));
+    const res = await service.search(
+      parser.parse({
+        shop_id: 'shop-001',
+      } as unknown as SearchProductsQueryDto),
+    );
     expect(res.meta.total).toBe(2);
     const ids = res.data.map((p) => p.product_id);
     expect(ids).toEqual(expect.arrayContaining(['prod-001', 'prod-002']));
@@ -272,7 +314,10 @@ describe('SearchQuery (Integration on real ES cluster)', () => {
 
   it('SQ-I-12: sorts by relevance with q=iPhone&sort=relevance and deterministic product_id asc tie-break', async () => {
     const res = await service.search(
-      parser.parse({ q: 'iPhone', sort: SortOption.RELEVANCE } as any),
+      parser.parse({
+        q: 'iPhone',
+        sort: SortOption.RELEVANCE,
+      } as unknown as SearchProductsQueryDto),
     );
     expect(res.meta.total).toBeGreaterThan(0);
     // All returned items match iPhone
@@ -283,7 +328,10 @@ describe('SearchQuery (Integration on real ES cluster)', () => {
 
   it('SQ-I-13: sorts by newest in descending order with product_id asc tie-break per D6', async () => {
     const res = await service.search(
-      parser.parse({ sort: SortOption.NEWEST, size: 10 } as any),
+      parser.parse({
+        sort: SortOption.NEWEST,
+        size: 10,
+      } as unknown as SearchProductsQueryDto),
     );
     const ids = res.data.map((p) => p.product_id);
     expect(ids).toEqual([
@@ -300,7 +348,10 @@ describe('SearchQuery (Integration on real ES cluster)', () => {
 
   it('SQ-I-14: sorts by price_asc in ascending price order with product_id asc tie-break', async () => {
     const res = await service.search(
-      parser.parse({ sort: SortOption.PRICE_ASC, size: 10 } as any),
+      parser.parse({
+        sort: SortOption.PRICE_ASC,
+        size: 10,
+      } as unknown as SearchProductsQueryDto),
     );
     const prices = res.data.map((p) => p.price.amount);
     expect(prices).toEqual([
@@ -321,7 +372,10 @@ describe('SearchQuery (Integration on real ES cluster)', () => {
 
   it('SQ-I-15: sorts by price_desc in descending price order', async () => {
     const res = await service.search(
-      parser.parse({ sort: SortOption.PRICE_DESC, size: 10 } as any),
+      parser.parse({
+        sort: SortOption.PRICE_DESC,
+        size: 10,
+      } as unknown as SearchProductsQueryDto),
     );
     const prices = res.data.map((p) => p.price.amount);
     expect(prices).toEqual([
@@ -342,7 +396,10 @@ describe('SearchQuery (Integration on real ES cluster)', () => {
 
   it('SQ-I-16: sorts by rating_desc with product_id tie-break when ratings collide', async () => {
     const res = await service.search(
-      parser.parse({ sort: SortOption.RATING_DESC, size: 10 } as any),
+      parser.parse({
+        sort: SortOption.RATING_DESC,
+        size: 10,
+      } as unknown as SearchProductsQueryDto),
     );
     const ids = res.data.map((p) => p.product_id);
 
@@ -363,7 +420,11 @@ describe('SearchQuery (Integration on real ES cluster)', () => {
 
   it('SQ-I-17: paginates page 1 of 3: page=1&size=3&sort=price_asc', async () => {
     const res = await service.search(
-      parser.parse({ page: 1, size: 3, sort: SortOption.PRICE_ASC } as any),
+      parser.parse({
+        page: 1,
+        size: 3,
+        sort: SortOption.PRICE_ASC,
+      } as unknown as SearchProductsQueryDto),
     );
     expect(res.meta).toMatchObject({
       page: 1,
@@ -371,12 +432,20 @@ describe('SearchQuery (Integration on real ES cluster)', () => {
       total: 8,
       total_pages: 3,
     });
-    expect(res.data.map((p) => p.product_id)).toEqual(['prod-001', 'prod-002', 'prod-006']);
+    expect(res.data.map((p) => p.product_id)).toEqual([
+      'prod-001',
+      'prod-002',
+      'prod-006',
+    ]);
   });
 
   it('SQ-I-18: paginates page 2 of 3: page=2&size=3&sort=price_asc', async () => {
     const res = await service.search(
-      parser.parse({ page: 2, size: 3, sort: SortOption.PRICE_ASC } as any),
+      parser.parse({
+        page: 2,
+        size: 3,
+        sort: SortOption.PRICE_ASC,
+      } as unknown as SearchProductsQueryDto),
     );
     expect(res.meta).toMatchObject({
       page: 2,
@@ -384,12 +453,20 @@ describe('SearchQuery (Integration on real ES cluster)', () => {
       total: 8,
       total_pages: 3,
     });
-    expect(res.data.map((p) => p.product_id)).toEqual(['prod-008', 'prod-004', 'prod-007']);
+    expect(res.data.map((p) => p.product_id)).toEqual([
+      'prod-008',
+      'prod-004',
+      'prod-007',
+    ]);
   });
 
   it('SQ-I-19: paginates page 3 of 3: page=3&size=3&sort=price_asc', async () => {
     const res = await service.search(
-      parser.parse({ page: 3, size: 3, sort: SortOption.PRICE_ASC } as any),
+      parser.parse({
+        page: 3,
+        size: 3,
+        sort: SortOption.PRICE_ASC,
+      } as unknown as SearchProductsQueryDto),
     );
     expect(res.meta).toMatchObject({
       page: 3,
@@ -402,7 +479,11 @@ describe('SearchQuery (Integration on real ES cluster)', () => {
 
   it('SQ-I-20: paginates beyond total pages page=5&size=3 returning data=[]', async () => {
     const res = await service.search(
-      parser.parse({ page: 5, size: 3, sort: SortOption.PRICE_ASC } as any),
+      parser.parse({
+        page: 5,
+        size: 3,
+        sort: SortOption.PRICE_ASC,
+      } as unknown as SearchProductsQueryDto),
     );
     expect(res.data).toEqual([]);
     expect(res.meta).toMatchObject({
@@ -415,7 +496,9 @@ describe('SearchQuery (Integration on real ES cluster)', () => {
 
   it('SQ-I-21: resolves category facet names and direct-children scope per D4', async () => {
     // Browse mode without category filter: returns root categories (cat-tech, cat-fashion)
-    const browseRes = await service.search(parser.parse({} as any));
+    const browseRes = await service.search(
+      parser.parse({} as unknown as SearchProductsQueryDto),
+    );
     const catFacets = browseRes.meta.facets!.category;
     expect(catFacets).toEqual([
       { category_id: 'cat-tech', name: 'Đồ công nghệ', count: 6 },
@@ -423,7 +506,11 @@ describe('SearchQuery (Integration on real ES cluster)', () => {
     ]);
 
     // Filtered by category_id=cat-tech: returns direct children (cat-phone, cat-laptop)
-    const techRes = await service.search(parser.parse({ category_id: 'cat-tech' } as any));
+    const techRes = await service.search(
+      parser.parse({
+        category_id: 'cat-tech',
+      } as unknown as SearchProductsQueryDto),
+    );
     expect(techRes.meta.facets!.category).toEqual([
       { category_id: 'cat-phone', name: 'Điện thoại', count: 4 },
       { category_id: 'cat-laptop', name: 'Laptop', count: 2 },
@@ -431,7 +518,9 @@ describe('SearchQuery (Integration on real ES cluster)', () => {
   });
 
   it('SQ-I-22: aggregates brand facet counts accurately', async () => {
-    const res = await service.search(parser.parse({} as any));
+    const res = await service.search(
+      parser.parse({} as unknown as SearchProductsQueryDto),
+    );
     const brandFacets = res.meta.facets!.brand;
     expect(brandFacets).toEqual([
       { value: 'Apple', count: 3 },
@@ -443,7 +532,9 @@ describe('SearchQuery (Integration on real ES cluster)', () => {
   });
 
   it('SQ-I-23: aggregates price facet with 3 fixed buckets per D9', async () => {
-    const res = await service.search(parser.parse({} as any));
+    const res = await service.search(
+      parser.parse({} as unknown as SearchProductsQueryDto),
+    );
     const priceFacets = res.meta.facets!.price;
     expect(priceFacets).toEqual([
       { min: 0, max: 5000000, count: 3 },
@@ -453,11 +544,15 @@ describe('SearchQuery (Integration on real ES cluster)', () => {
   });
 
   it('SQ-I-24: aggregates dynamic variant dimension attributes (color, capacity_liter, size)', async () => {
-    const res = await service.search(parser.parse({} as any));
+    const res = await service.search(
+      parser.parse({} as unknown as SearchProductsQueryDto),
+    );
     const attrFacets = res.meta.facets!.attributes;
 
     expect(attrFacets.capacity_liter).toBeDefined();
-    const capacityCounts = new Map(attrFacets.capacity_liter.map((i) => [i.value, i.count]));
+    const capacityCounts = new Map(
+      attrFacets.capacity_liter.map((i) => [i.value, i.count]),
+    );
     expect(capacityCounts.get('256GB')).toBe(3);
     expect(capacityCounts.get('512GB')).toBe(3);
     expect(capacityCounts.get('128GB')).toBe(2);
@@ -467,7 +562,9 @@ describe('SearchQuery (Integration on real ES cluster)', () => {
   });
 
   it('SQ-I-25: strictly excludes spec_attributes from dynamic attribute facets', async () => {
-    const res = await service.search(parser.parse({} as any));
+    const res = await service.search(
+      parser.parse({} as unknown as SearchProductsQueryDto),
+    );
     const attrFacets = res.meta.facets!.attributes;
     const keys = Object.keys(attrFacets);
 
@@ -488,7 +585,9 @@ describe('SearchQuery (Integration on real ES cluster)', () => {
   });
 
   it('SQ-I-26: applies multi-select post_filter on brand so brand facet counts are retained', async () => {
-    const res = await service.search(parser.parse({ brand: ['Apple'] } as any));
+    const res = await service.search(
+      parser.parse({ brand: ['Apple'] } as unknown as SearchProductsQueryDto),
+    );
 
     // Data contains only 3 Apple products
     expect(res.meta.total).toBe(3);
@@ -505,12 +604,18 @@ describe('SearchQuery (Integration on real ES cluster)', () => {
 
     // Concurrently, category facet reflects only categories containing Apple
     const catFacets = res.meta.facets!.category;
-    expect(catFacets.find((c) => c.category_id === 'cat-fashion')).toBeUndefined();
+    expect(
+      catFacets.find((c) => c.category_id === 'cat-fashion'),
+    ).toBeUndefined();
     expect(catFacets.find((c) => c.category_id === 'cat-tech')?.count).toBe(3);
   });
 
   it('SQ-I-27: applies multi-select post_filter on category retaining category counts while filtering brand', async () => {
-    const res = await service.search(parser.parse({ category_id: 'cat-outerwear' } as any));
+    const res = await service.search(
+      parser.parse({
+        category_id: 'cat-outerwear',
+      } as unknown as SearchProductsQueryDto),
+    );
     expect(res.meta.total).toBe(2);
     const ids = res.data.map((p) => p.product_id);
     expect(ids).toEqual(expect.arrayContaining(['prod-001', 'prod-002']));
@@ -525,12 +630,16 @@ describe('SearchQuery (Integration on real ES cluster)', () => {
 
   it('SQ-I-28: applies multi-select post_filter on attribute so other values in same key are retained', async () => {
     const res = await service.search(
-      parser.parse({ attribute: { capacity_liter: '256GB' } } as any),
+      parser.parse({
+        attribute: { capacity_liter: '256GB' },
+      } as unknown as SearchProductsQueryDto),
     );
     // Data contains prod-003, prod-005, prod-007
     expect(res.meta.total).toBe(3);
     const ids = res.data.map((p) => p.product_id);
-    expect(ids).toEqual(expect.arrayContaining(['prod-003', 'prod-005', 'prod-007']));
+    expect(ids).toEqual(
+      expect.arrayContaining(['prod-003', 'prod-005', 'prod-007']),
+    );
 
     // capacity_liter facet still reports counts for 128GB and 512GB (allowing multi-select)
     const capFacet = res.meta.facets!.attributes.capacity_liter;
@@ -540,7 +649,9 @@ describe('SearchQuery (Integration on real ES cluster)', () => {
     expect(capMap.get('128GB')).toBe(2);
 
     // brand facet shows Apple (2) and Samsung (1)
-    const brandMap = new Map(res.meta.facets!.brand.map((b) => [b.value, b.count]));
+    const brandMap = new Map(
+      res.meta.facets!.brand.map((b) => [b.value, b.count]),
+    );
     expect(brandMap.get('Apple')).toBe(2);
     expect(brandMap.get('Samsung')).toBe(1);
   });
@@ -551,7 +662,7 @@ describe('SearchQuery (Integration on real ES cluster)', () => {
         category_id: 'cat-tech',
         brand: ['Samsung'],
         min_price: 20000000,
-      } as any),
+      } as unknown as SearchProductsQueryDto),
     );
     expect(res.meta.total).toBe(1);
     expect(res.data[0].product_id).toBe('prod-005');

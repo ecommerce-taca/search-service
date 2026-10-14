@@ -41,9 +41,54 @@ export class SearchProductsService {
     const alias = getProductsAlias(this.configService.esIndexPrefix);
     const esRequest = this.requestBuilder.build(parsed);
 
-    let response: estypes.SearchResponse<ProductSearchDocument>;
+    const response = await this.runQuery(alias, esRequest);
+    const indexAsOf = this.readIndexAsOf(response.aggregations);
+
+    if (!parsed.includeFacets) {
+      return this.resultMapper.map(response, parsed, undefined, indexAsOf);
+    }
+
+    const aggs = response.aggregations;
+    const categoryAgg = aggs?.category as
+      AggWithValues<{ key: string; doc_count: number }> | undefined;
+    const rawCategoryBuckets = categoryAgg?.values?.buckets || [];
+
+    const brandAgg = aggs?.brand as
+      AggWithValues<{ key: string; doc_count: number }> | undefined;
+    const rawBrandBuckets = brandAgg?.values?.buckets || [];
+
+    const priceAgg = aggs?.price as
+      | AggWithValues<{ from?: number; to?: number; doc_count: number }>
+      | undefined;
+    const rawPriceBuckets = priceAgg?.values?.buckets || [];
+
+    const categoryItems = await this.buildCategoryFacet(
+      rawCategoryBuckets,
+      parsed.filters.categoryId,
+    );
+    const brandItems = this.buildBrandFacet(rawBrandBuckets);
+    const priceItems = this.buildPriceFacet(rawPriceBuckets);
+    const attributeFacets = this.buildAttributeFacets(
+      aggs,
+      Object.keys(parsed.filters.attributes),
+    );
+
+    const facets: SearchFacets = {
+      category: categoryItems,
+      brand: brandItems,
+      price: priceItems,
+      attributes: attributeFacets,
+    };
+
+    return this.resultMapper.map(response, parsed, facets, indexAsOf);
+  }
+
+  private async runQuery(
+    alias: string,
+    esRequest: estypes.SearchRequest,
+  ): Promise<estypes.SearchResponse<ProductSearchDocument>> {
     try {
-      response = await this.esClient.search<ProductSearchDocument>(
+      return await this.esClient.search<ProductSearchDocument>(
         {
           index: alias,
           ...esRequest,
@@ -55,40 +100,36 @@ export class SearchProductsService {
     } catch (err: unknown) {
       throw toSearchException(err);
     }
+  }
 
-    const aggs = response.aggregations;
-
-    // Extract index_as_of from max agg
-    let indexAsOf: string | undefined;
-    if (aggs?.index_as_of) {
-      const maxAgg = aggs.index_as_of as {
-        value_as_string?: string;
-        value?: number;
-      };
-      if (maxAgg.value_as_string) {
-        indexAsOf = maxAgg.value_as_string;
-      } else if (
-        typeof maxAgg.value === 'number' &&
-        !isNaN(maxAgg.value) &&
-        maxAgg.value > 0
-      ) {
-        indexAsOf = new Date(maxAgg.value).toISOString();
-      }
+  private readIndexAsOf(
+    aggregations?: Record<string, estypes.AggregationsAggregate>,
+  ): string | null {
+    if (!aggregations?.index_as_of) {
+      return null;
     }
-
-    if (!indexAsOf) {
-      const firstHitIndexedAt = response.hits?.hits?.[0]?._source?.indexed_at;
-      indexAsOf = firstHitIndexedAt || new Date().toISOString();
+    const maxAgg = aggregations.index_as_of as {
+      value_as_string?: string;
+      value?: number | null;
+    };
+    if (maxAgg.value_as_string) {
+      return maxAgg.value_as_string;
     }
-
-    if (!parsed.includeFacets) {
-      return this.resultMapper.map(response, parsed, undefined, indexAsOf);
+    if (
+      typeof maxAgg.value === 'number' &&
+      !isNaN(maxAgg.value) &&
+      isFinite(maxAgg.value) &&
+      maxAgg.value > 0
+    ) {
+      return new Date(maxAgg.value).toISOString();
     }
+    return null;
+  }
 
-    // Process category facet
-    const categoryAgg = aggs?.category as
-      AggWithValues<{ key: string; doc_count: number }> | undefined;
-    const rawCategoryBuckets = categoryAgg?.values?.buckets || [];
+  private async buildCategoryFacet(
+    rawCategoryBuckets: Array<{ key: string; doc_count: number }>,
+    selectedCategoryId?: string,
+  ): Promise<CategoryFacetItem[]> {
     const categoryIds = rawCategoryBuckets
       .filter((b) => b.doc_count > 0)
       .map((b) => String(b.key));
@@ -96,7 +137,6 @@ export class SearchProductsService {
     const projectionMap = await this.categoryProjection.getMany(categoryIds);
 
     const categoryItems: CategoryFacetItem[] = [];
-    const selectedCategoryId = parsed.filters.categoryId;
 
     for (const bucket of rawCategoryBuckets) {
       if (bucket.doc_count <= 0) continue;
@@ -131,11 +171,13 @@ export class SearchProductsService {
       return a.name.localeCompare(b.name);
     });
 
-    // Process brand facet
-    const brandAgg = aggs?.brand as
-      AggWithValues<{ key: string; doc_count: number }> | undefined;
-    const rawBrandBuckets = brandAgg?.values?.buckets || [];
-    const brandItems: BrandFacetItem[] = rawBrandBuckets
+    return categoryItems;
+  }
+
+  private buildBrandFacet(
+    rawBrandBuckets: Array<{ key: string; doc_count: number }>,
+  ): BrandFacetItem[] {
+    return rawBrandBuckets
       .filter((b) => b.doc_count > 0)
       .map((b) => ({
         value: String(b.key),
@@ -145,13 +187,12 @@ export class SearchProductsService {
         if (b.count !== a.count) return b.count - a.count;
         return a.value.localeCompare(b.value);
       });
+  }
 
-    // Process price facet (D9 fixed buckets)
-    const priceAgg = aggs?.price as
-      | AggWithValues<{ from?: number; to?: number; doc_count: number }>
-      | undefined;
-    const rawPriceBuckets = priceAgg?.values?.buckets || [];
-    const priceItems: PriceFacetBucket[] = [
+  private buildPriceFacet(
+    rawPriceBuckets: Array<{ doc_count: number }>,
+  ): PriceFacetBucket[] {
+    return [
       {
         min: 0,
         max: 5000000,
@@ -168,8 +209,12 @@ export class SearchProductsService {
         count: rawPriceBuckets[2]?.doc_count ?? 0,
       },
     ];
+  }
 
-    // Process dynamic attributes facet
+  private buildAttributeFacets(
+    aggregations: Record<string, estypes.AggregationsAggregate> | undefined,
+    selectedKeys: string[],
+  ): Record<string, AttributeFacetItem[]> {
     const keyValuesMap = new Map<string, Map<string, number>>();
 
     const addBucket = (keyVal: string, count: number) => {
@@ -188,8 +233,8 @@ export class SearchProductsService {
     };
 
     // Selected attribute keys
-    for (const selKey of Object.keys(parsed.filters.attributes)) {
-      const selAgg = aggs?.[`attr_sel_${selKey}`] as
+    for (const selKey of selectedKeys) {
+      const selAgg = aggregations?.[`attr_sel_${selKey}`] as
         AggWithValues<{ key: string; doc_count: number }> | undefined;
       for (const b of selAgg?.values?.buckets || []) {
         addBucket(String(b.key), b.doc_count);
@@ -197,7 +242,7 @@ export class SearchProductsService {
     }
 
     // attr_rest
-    const restAgg = aggs?.['attr_rest'] as
+    const restAgg = aggregations?.['attr_rest'] as
       AggWithValues<{ key: string; doc_count: number }> | undefined;
     for (const b of restAgg?.values?.buckets || []) {
       addBucket(String(b.key), b.doc_count);
@@ -236,13 +281,6 @@ export class SearchProductsService {
       attributesFacets[key] = items.slice(0, 30);
     }
 
-    const facets: SearchFacets = {
-      category: categoryItems,
-      brand: brandItems,
-      price: priceItems,
-      attributes: attributesFacets,
-    };
-
-    return this.resultMapper.map(response, parsed, facets, indexAsOf);
+    return attributesFacets;
   }
 }

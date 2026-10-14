@@ -57,7 +57,7 @@ export interface SearchResultMeta {
   size: number;
   total: number;
   total_pages: number;
-  index_as_of: string;
+  index_as_of: string | null;
   facets?: SearchFacets;
   [key: string]: unknown;
 }
@@ -109,7 +109,7 @@ export class SearchResultMapper {
     response: estypes.SearchResponse<ProductSearchDocument>,
     parsed: ParsedSearchQuery,
     facets?: SearchFacets,
-    indexAsOf?: string,
+    indexAsOf?: string | null,
   ): SearchResult {
     return SearchResultMapper.map(response, parsed, facets, indexAsOf);
   }
@@ -118,7 +118,7 @@ export class SearchResultMapper {
     response: estypes.SearchResponse<ProductSearchDocument>,
     parsed: ParsedSearchQuery,
     facets?: SearchFacets,
-    indexAsOf?: string,
+    indexAsOf?: string | null,
   ): SearchResult {
     const hits = response.hits?.hits || [];
     const data: ProductCard[] = hits.map((hit) =>
@@ -140,7 +140,7 @@ export class SearchResultMapper {
       size: parsed.size,
       total,
       total_pages: totalPages,
-      index_as_of: indexAsOf || new Date().toISOString(),
+      index_as_of: indexAsOf ?? null,
     };
 
     // D7: include_facets = false -> meta.facets key omitted

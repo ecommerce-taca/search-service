@@ -2,7 +2,11 @@ import { estypes } from '@elastic/elasticsearch';
 import { SortOption } from '../common/enums';
 import { ProductSearchDocument } from '../product-index/interfaces';
 import { ParsedSearchQuery } from './query-parser';
-import { ResultMapper, SearchFacets, SearchResultMapper } from './result.mapper';
+import {
+  ResultMapper,
+  SearchFacets,
+  SearchResultMapper,
+} from './result.mapper';
 
 describe('SearchResultMapper / ResultMapper', () => {
   let mapper: SearchResultMapper;
@@ -144,5 +148,27 @@ describe('SearchResultMapper / ResultMapper', () => {
       title: 'Test',
     });
     expect(card.product_id).toBe('prod-002');
+  });
+
+  it('maps index_as_of exactly without fallback to new Date()', () => {
+    const resWithDate = mapper.map(
+      {
+        hits: { total: 1, hits: [] },
+      } as unknown as estypes.SearchResponse<ProductSearchDocument>,
+      baseParsed,
+      undefined,
+      '2026-09-01T10:00:00Z',
+    );
+    expect(resWithDate.meta.index_as_of).toBe('2026-09-01T10:00:00Z');
+
+    const resWithNull = mapper.map(
+      {
+        hits: { total: 0, hits: [] },
+      } as unknown as estypes.SearchResponse<ProductSearchDocument>,
+      baseParsed,
+      undefined,
+      null,
+    );
+    expect(resWithNull.meta.index_as_of).toBeNull();
   });
 });

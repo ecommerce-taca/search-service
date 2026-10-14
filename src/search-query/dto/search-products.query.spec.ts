@@ -28,8 +28,15 @@ describe('SearchProductsQueryDto', () => {
   });
 
   it('SQ-U-03: rejects invalid sort options', async () => {
-    for (const invalidSort of ['popular', 'price_descending', 'id_asc', 'unknown']) {
-      const dto = plainToInstance(SearchProductsQueryDto, { sort: invalidSort });
+    for (const invalidSort of [
+      'popular',
+      'price_descending',
+      'id_asc',
+      'unknown',
+    ]) {
+      const dto = plainToInstance(SearchProductsQueryDto, {
+        sort: invalidSort,
+      });
       const errors = await validate(dto);
       expect(errors.length).toBeGreaterThan(0);
       expect(errors[0].property).toBe('sort');
@@ -83,7 +90,9 @@ describe('SearchProductsQueryDto', () => {
   it('SQ-U-08: rejects attribute keys containing script or injection syntax', async () => {
     const constraint = new IsAttributeRecordConstraint();
 
-    expect(constraint.validate({ '<script>alert(1)</script>': 'x' })).toBe(false);
+    expect(constraint.validate({ '<script>alert(1)</script>': 'x' })).toBe(
+      false,
+    );
     expect(constraint.validate({ $where: 'sleep(1000)' })).toBe(false);
     expect(constraint.validate({ "key' OR 1=1--": 'x' })).toBe(false);
   });
@@ -105,7 +114,9 @@ describe('SearchProductsQueryDto', () => {
 
   it('SQ-U-13: rejects size=0, negative size, or non-integer size', async () => {
     for (const invalidSize of ['0', '-5', 'twenty', '10.5']) {
-      const dto = plainToInstance(SearchProductsQueryDto, { size: invalidSize });
+      const dto = plainToInstance(SearchProductsQueryDto, {
+        size: invalidSize,
+      });
       const errors = await validate(dto);
       expect(errors.length).toBeGreaterThan(0);
       expect(errors[0].property).toBe('size');
@@ -114,7 +125,9 @@ describe('SearchProductsQueryDto', () => {
 
   it('SQ-U-14: rejects page=0, negative page, or non-integer page', async () => {
     for (const invalidPage of ['0', '-1', 'abc', '1.5']) {
-      const dto = plainToInstance(SearchProductsQueryDto, { page: invalidPage });
+      const dto = plainToInstance(SearchProductsQueryDto, {
+        page: invalidPage,
+      });
       const errors = await validate(dto);
       expect(errors.length).toBeGreaterThan(0);
       expect(errors[0].property).toBe('page');
@@ -123,7 +136,9 @@ describe('SearchProductsQueryDto', () => {
 
   it('SQ-U-15 & SQ-U-16: validates integer non-negative price', async () => {
     for (const invalidPrice of ['10.5', '29.99', '1e5', '-1000']) {
-      const dto = plainToInstance(SearchProductsQueryDto, { min_price: invalidPrice });
+      const dto = plainToInstance(SearchProductsQueryDto, {
+        min_price: invalidPrice,
+      });
       const errors = await validate(dto);
       expect(errors.length).toBeGreaterThan(0);
       expect(errors[0].property).toBe('min_price');
@@ -142,16 +157,22 @@ describe('SearchProductsQueryDto', () => {
   });
 
   it('SQ-U-19 & SQ-U-20: validates include_facets boolean transformation', async () => {
-    const trueDto = plainToInstance(SearchProductsQueryDto, { include_facets: 'true' });
+    const trueDto = plainToInstance(SearchProductsQueryDto, {
+      include_facets: 'true',
+    });
     expect(await validate(trueDto)).toHaveLength(0);
     expect(trueDto.include_facets).toBe(true);
 
-    const falseDto = plainToInstance(SearchProductsQueryDto, { include_facets: 'false' });
+    const falseDto = plainToInstance(SearchProductsQueryDto, {
+      include_facets: 'false',
+    });
     expect(await validate(falseDto)).toHaveLength(0);
     expect(falseDto.include_facets).toBe(false);
 
     for (const invalidBool of ['yes', '1', 'undefined', 'invalid']) {
-      const dto = plainToInstance(SearchProductsQueryDto, { include_facets: invalidBool });
+      const dto = plainToInstance(SearchProductsQueryDto, {
+        include_facets: invalidBool,
+      });
       const errors = await validate(dto);
       expect(errors.length).toBeGreaterThan(0);
       expect(errors[0].property).toBe('include_facets');
@@ -163,7 +184,9 @@ describe('SearchProductsQueryDto', () => {
     expect(await validate(single)).toHaveLength(0);
     expect(single.brand).toEqual(['Apple']);
 
-    const multi = plainToInstance(SearchProductsQueryDto, { brand: ['Apple', 'Samsung'] });
+    const multi = plainToInstance(SearchProductsQueryDto, {
+      brand: ['Apple', 'Samsung'],
+    });
     expect(await validate(multi)).toHaveLength(0);
     expect(multi.brand).toEqual(['Apple', 'Samsung']);
   });

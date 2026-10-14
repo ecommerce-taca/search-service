@@ -54,98 +54,116 @@ describe('SearchQuery (e2e HTTP Contract Tests without cluster)', () => {
       }
       return res;
     }),
-    resolvePathIds: jest.fn().mockResolvedValue(['cat-fashion', 'cat-outerwear']),
+    resolvePathIds: jest
+      .fn()
+      .mockResolvedValue(['cat-fashion', 'cat-outerwear']),
   };
 
   beforeAll(async () => {
-    mockSearchFn = jest.fn().mockImplementation(async (params: { query?: any; [key: string]: any }) => {
-      const textQuery = params.query?.bool?.must?.[0]?.multi_match?.query;
-
-      // SQ-E-05: timeout simulation
-      if (textQuery === 'slowquery') {
-        throw new errors.TimeoutError('Elasticsearch request timed out');
-      }
-
-      // SQ-E-06: cluster down simulation
-      if (textQuery === 'downquery') {
-        throw new errors.ConnectionError('Elasticsearch cluster connection refused');
-      }
-
-      // SQ-E-09 & SQ-E-10: injection attempts return 0 results
-      if (
-        textQuery?.includes('match_all') ||
-        textQuery?.includes('visibility_status:HIDDEN')
-      ) {
-        return {
-          hits: { total: 0, hits: [] },
-          aggregations: {
-            category: { values: { buckets: [] } },
-            brand: { values: { buckets: [] } },
-            price: { values: { buckets: [] } },
-            attr_rest: { values: { buckets: [] } },
-            index_as_of: { value_as_string: '2026-09-01T10:00:00Z' },
-          },
+    mockSearchFn = jest.fn().mockImplementation(
+      async (params: {
+        query?: {
+          bool?: {
+            must?: Array<{ multi_match?: { query?: string } }>;
+          };
         };
-      }
+        [key: string]: unknown;
+      }) => {
+        const textQuery = params.query?.bool?.must?.[0]?.multi_match?.query;
 
-      // Default mock response: cotton query (prod-001)
-      return {
-        hits: {
-          total: { value: 1, relation: 'eq' },
-          hits: [
-            {
-              _id: 'prod-001',
-              _source: {
-                product_id: 'prod-001',
-                title: 'Áo khoác cotton nam cao cấp',
-                slug: 'ao-khoac-cotton-nam-cao-cap',
-                shop: {
-                  shop_id: 'shop-001',
-                  name: 'Fashion House',
+        // SQ-E-05: timeout simulation
+        if (textQuery === 'slowquery') {
+          throw new errors.TimeoutError('Elasticsearch request timed out');
+        }
+
+        // SQ-E-06: cluster down simulation
+        if (textQuery === 'downquery') {
+          throw new errors.ConnectionError(
+            'Elasticsearch cluster connection refused',
+          );
+        }
+
+        // SQ-E-09 & SQ-E-10: injection attempts return 0 results
+        if (
+          textQuery?.includes('match_all') ||
+          textQuery?.includes('visibility_status:HIDDEN')
+        ) {
+          return {
+            hits: { total: 0, hits: [] },
+            aggregations: {
+              category: { values: { buckets: [] } },
+              brand: { values: { buckets: [] } },
+              price: { values: { buckets: [] } },
+              attr_rest: { values: { buckets: [] } },
+              index_as_of: { value_as_string: '2026-09-01T10:00:00Z' },
+            },
+          };
+        }
+
+        // Default mock response: cotton query (prod-001)
+        return {
+          hits: {
+            total: { value: 1, relation: 'eq' },
+            hits: [
+              {
+                _id: 'prod-001',
+                _source: {
+                  product_id: 'prod-001',
+                  title: 'Áo khoác cotton nam cao cấp',
+                  slug: 'ao-khoac-cotton-nam-cao-cap',
+                  shop: {
+                    shop_id: 'shop-001',
+                    name: 'Fashion House',
+                  },
+                  price: 350000,
+                  currency: 'VND',
+                  cover_url: 'https://cdn.example.com/p1.jpg',
+                  rating_avg: 4.8,
+                  indexed_at: '2026-09-01T10:00:00Z',
                 },
-                price: 350000,
-                currency: 'VND',
-                cover_url: 'https://cdn.example.com/p1.jpg',
-                rating_avg: 4.8,
-                indexed_at: '2026-09-01T10:00:00Z',
+              },
+            ],
+          },
+          aggregations: {
+            category: {
+              values: {
+                buckets: [{ key: 'cat-fashion', doc_count: 1 }],
               },
             },
-          ],
-        },
-        aggregations: {
-          category: {
-            values: {
-              buckets: [{ key: 'cat-fashion', doc_count: 1 }],
+            brand: {
+              values: {
+                buckets: [{ key: 'Taca Brand', doc_count: 1 }],
+              },
+            },
+            price: {
+              values: {
+                buckets: [
+                  { key: '*-5000000.0', to: 5000000, doc_count: 1 },
+                  {
+                    key: '5000000.0-20000000.0',
+                    from: 5000000,
+                    to: 20000000,
+                    doc_count: 0,
+                  },
+                  { key: '20000000.0-*', from: 20000000, doc_count: 0 },
+                ],
+              },
+            },
+            attr_rest: {
+              values: {
+                buckets: [
+                  { key: 'color=Đen', doc_count: 1 },
+                  { key: 'size=L', doc_count: 1 },
+                ],
+              },
+            },
+            index_as_of: {
+              value_as_string: '2026-09-01T10:00:00Z',
             },
           },
-          brand: {
-            values: {
-              buckets: [{ key: 'Taca Brand', doc_count: 1 }],
-            },
-          },
-          price: {
-            values: {
-              buckets: [
-                { key: '*-5000000.0', to: 5000000, doc_count: 1 },
-                { key: '5000000.0-20000000.0', from: 5000000, to: 20000000, doc_count: 0 },
-                { key: '20000000.0-*', from: 20000000, doc_count: 0 },
-              ],
-            },
-          },
-          attr_rest: {
-            values: {
-              buckets: [
-                { key: 'color=Đen', doc_count: 1 },
-                { key: 'size=L', doc_count: 1 },
-              ],
-            },
-          },
-          index_as_of: {
-            value_as_string: '2026-09-01T10:00:00Z',
-          },
-        },
-      };
-    });
+        };
+      },
+    );
 
     const mockEsClient = {
       search: mockSearchFn,
@@ -353,7 +371,8 @@ describe('SearchQuery (e2e HTTP Contract Tests without cluster)', () => {
 
     expect(res.body.data).toEqual([]);
     // Verify ES query was constructed safely with plain string
-    const lastCall = mockSearchFn.mock.calls[mockSearchFn.mock.calls.length - 1][0];
+    const lastCall =
+      mockSearchFn.mock.calls[mockSearchFn.mock.calls.length - 1][0];
     const textPassed = lastCall.query?.bool?.must?.[0]?.multi_match?.query;
     expect(textPassed).toBe(injection);
   });
@@ -365,7 +384,8 @@ describe('SearchQuery (e2e HTTP Contract Tests without cluster)', () => {
       .expect(200);
 
     expect(res.body.data).toEqual([]);
-    const lastCall = mockSearchFn.mock.calls[mockSearchFn.mock.calls.length - 1][0];
+    const lastCall =
+      mockSearchFn.mock.calls[mockSearchFn.mock.calls.length - 1][0];
     const filters = lastCall.query?.bool?.filter;
     expect(filters).toEqual(
       expect.arrayContaining([{ term: { visibility_status: 'PUBLISHED' } }]),
@@ -380,7 +400,9 @@ describe('SearchQuery (e2e HTTP Contract Tests without cluster)', () => {
     expect(res1.body.error.code).toBe(SearchErrorCode.SEARCH_INVALID_INPUT);
 
     const res2 = await request(app.getHttpServer())
-      .get('/api/v1/products/search?attribute[script]=doc%5B%27price%27%5D.value')
+      .get(
+        '/api/v1/products/search?attribute[script]=doc%5B%27price%27%5D.value',
+      )
       .expect(400);
 
     expect(res2.body.error.code).toBe(SearchErrorCode.SEARCH_INVALID_INPUT);

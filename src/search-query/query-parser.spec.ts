@@ -1,6 +1,9 @@
 import { plainToInstance } from 'class-transformer';
 import { SortOption } from '../common/enums';
-import { ERROR_MESSAGES_MAP, SearchErrorCode } from '../common/errors/error-codes';
+import {
+  ERROR_MESSAGES_MAP,
+  SearchErrorCode,
+} from '../common/errors/error-codes';
 import { SearchException } from '../common/errors/search.exception';
 import { SearchProductsQueryDto } from './dto/search-products.query';
 import { QueryParser } from './query-parser';
@@ -23,7 +26,9 @@ describe('QueryParser', () => {
     } catch (err) {
       const e = err as SearchException;
       expect(e.code).toBe(SearchErrorCode.SEARCH_INVALID_INPUT);
-      expect(e.message).toBe(ERROR_MESSAGES_MAP[SearchErrorCode.SEARCH_INVALID_INPUT]);
+      expect(e.message).toBe(
+        ERROR_MESSAGES_MAP[SearchErrorCode.SEARCH_INVALID_INPUT],
+      );
       expect(e.getStatus()).toBe(400);
       expect(e.details).toEqual(["Unexpected parameter 'foo'"]);
     }
@@ -48,7 +53,9 @@ describe('QueryParser', () => {
   it('SQ-U-03: throws SEARCH_INVALID_INPUT with detail for unsupported sort option', () => {
     for (const invalidSort of ['popular', 'price_descending', 'id_asc']) {
       try {
-        parser.parse({ sort: invalidSort } as unknown as SearchProductsQueryDto);
+        parser.parse({
+          sort: invalidSort,
+        } as unknown as SearchProductsQueryDto);
         fail(`Expected SearchException for sort=${invalidSort}`);
       } catch (err) {
         const e = err as SearchException;
@@ -61,18 +68,24 @@ describe('QueryParser', () => {
 
   it('SQ-U-04: passes validation cleanly for each valid sort option and applies D6 defaults', () => {
     for (const validSort of Object.values(SortOption)) {
-      const parsed = parser.parse({ sort: validSort } as unknown as SearchProductsQueryDto);
+      const parsed = parser.parse({
+        sort: validSort,
+      } as unknown as SearchProductsQueryDto);
       expect(parsed.sort).toBe(validSort);
     }
 
     // D6 default sort: relevance when q present, newest when q absent
-    const withQ = parser.parse({ q: 'iPhone' } as unknown as SearchProductsQueryDto);
+    const withQ = parser.parse({
+      q: 'iPhone',
+    } as unknown as SearchProductsQueryDto);
     expect(withQ.sort).toBe(SortOption.RELEVANCE);
 
     const withoutQ = parser.parse({} as unknown as SearchProductsQueryDto);
     expect(withoutQ.sort).toBe(SortOption.NEWEST);
 
-    const withWhitespaceQ = parser.parse({ q: '   ' } as unknown as SearchProductsQueryDto);
+    const withWhitespaceQ = parser.parse({
+      q: '   ',
+    } as unknown as SearchProductsQueryDto);
     expect(withWhitespaceQ.sort).toBe(SortOption.NEWEST);
   });
 
@@ -156,7 +169,9 @@ describe('QueryParser', () => {
       } catch (err) {
         const e = err as SearchException;
         expect(e.code).toBe(SearchErrorCode.SEARCH_QUERY_TOO_LONG);
-        expect(e.message).toBe(ERROR_MESSAGES_MAP[SearchErrorCode.SEARCH_QUERY_TOO_LONG]);
+        expect(e.message).toBe(
+          ERROR_MESSAGES_MAP[SearchErrorCode.SEARCH_QUERY_TOO_LONG],
+        );
         expect(e.getStatus()).toBe(400);
       }
     }
@@ -164,7 +179,9 @@ describe('QueryParser', () => {
 
   it('SQ-U-10: passes validation cleanly when q contains exactly 200 Unicode characters', () => {
     const q200 = 'á'.repeat(200);
-    const parsed = parser.parse({ q: q200 } as unknown as SearchProductsQueryDto);
+    const parsed = parser.parse({
+      q: q200,
+    } as unknown as SearchProductsQueryDto);
     expect(parsed.text).toBe(q200);
     expect(Array.from(parsed.text || '').length).toBe(200);
   });
@@ -181,14 +198,20 @@ describe('QueryParser', () => {
   });
 
   it('SQ-U-12: passes validation cleanly with size boundaries 1 and 100', () => {
-    expect(parser.parse({ size: 100 } as unknown as SearchProductsQueryDto).size).toBe(100);
-    expect(parser.parse({ size: 1 } as unknown as SearchProductsQueryDto).size).toBe(1);
+    expect(
+      parser.parse({ size: 100 } as unknown as SearchProductsQueryDto).size,
+    ).toBe(100);
+    expect(
+      parser.parse({ size: 1 } as unknown as SearchProductsQueryDto).size,
+    ).toBe(1);
   });
 
   it('SQ-U-13: throws SEARCH_INVALID_INPUT for size=0, size=-5, or non-integer size', () => {
     for (const invalidSize of [0, -5, 'twenty', 10.5]) {
       expect(() =>
-        parser.parse({ size: invalidSize } as unknown as SearchProductsQueryDto),
+        parser.parse({
+          size: invalidSize,
+        } as unknown as SearchProductsQueryDto),
       ).toThrow(SearchException);
     }
   });
@@ -196,7 +219,9 @@ describe('QueryParser', () => {
   it('SQ-U-14: throws SEARCH_INVALID_INPUT for page=0, page=-1, page=abc, or page=1.5', () => {
     for (const invalidPage of [0, -1, 'abc', 1.5]) {
       expect(() =>
-        parser.parse({ page: invalidPage } as unknown as SearchProductsQueryDto),
+        parser.parse({
+          page: invalidPage,
+        } as unknown as SearchProductsQueryDto),
       ).toThrow(SearchException);
     }
   });
@@ -204,14 +229,20 @@ describe('QueryParser', () => {
   it('SQ-U-15: throws SEARCH_INVALID_INPUT for floating point or scientific notation price', () => {
     for (const invalidPrice of [10.5, '29.99', NaN]) {
       expect(() =>
-        parser.parse({ min_price: invalidPrice } as unknown as SearchProductsQueryDto),
+        parser.parse({
+          min_price: invalidPrice,
+        } as unknown as SearchProductsQueryDto),
       ).toThrow(SearchException);
       expect(() =>
-        parser.parse({ max_price: invalidPrice } as unknown as SearchProductsQueryDto),
+        parser.parse({
+          max_price: invalidPrice,
+        } as unknown as SearchProductsQueryDto),
       ).toThrow(SearchException);
     }
 
-    const scientificDto = plainToInstance(SearchProductsQueryDto, { min_price: '1e5' });
+    const scientificDto = plainToInstance(SearchProductsQueryDto, {
+      min_price: '1e5',
+    });
     expect(() => parser.parse(scientificDto)).toThrow(SearchException);
   });
 
@@ -266,8 +297,9 @@ describe('QueryParser', () => {
 
   it('SQ-U-20: correctly parses include_facets boolean values and defaults to true', () => {
     expect(
-      parser.parse({ include_facets: false } as unknown as SearchProductsQueryDto)
-        .includeFacets,
+      parser.parse({
+        include_facets: false,
+      } as unknown as SearchProductsQueryDto).includeFacets,
     ).toBe(false);
     expect(
       parser.parse({
@@ -276,8 +308,9 @@ describe('QueryParser', () => {
     ).toBe(false);
 
     expect(
-      parser.parse({ include_facets: true } as unknown as SearchProductsQueryDto)
-        .includeFacets,
+      parser.parse({
+        include_facets: true,
+      } as unknown as SearchProductsQueryDto).includeFacets,
     ).toBe(true);
     expect(
       parser.parse({
@@ -285,15 +318,23 @@ describe('QueryParser', () => {
       } as unknown as SearchProductsQueryDto).includeFacets,
     ).toBe(true);
 
-    expect(parser.parse({} as unknown as SearchProductsQueryDto).includeFacets).toBe(true);
+    expect(
+      parser.parse({} as unknown as SearchProductsQueryDto).includeFacets,
+    ).toBe(true);
   });
 
   it('rejects page * size > 10000 (ES max_result_window)', () => {
     expect(() =>
-      parser.parse({ page: 101, size: 100 } as unknown as SearchProductsQueryDto),
+      parser.parse({
+        page: 101,
+        size: 100,
+      } as unknown as SearchProductsQueryDto),
     ).toThrow(SearchException);
     expect(() =>
-      parser.parse({ page: 200, size: 60 } as unknown as SearchProductsQueryDto),
+      parser.parse({
+        page: 200,
+        size: 60,
+      } as unknown as SearchProductsQueryDto),
     ).toThrow(SearchException);
   });
 
@@ -304,7 +345,9 @@ describe('QueryParser', () => {
       elevenKeys[`attr_${i}`] = 'val';
     }
     expect(() =>
-      parser.parse({ attribute: elevenKeys } as unknown as SearchProductsQueryDto),
+      parser.parse({
+        attribute: elevenKeys,
+      } as unknown as SearchProductsQueryDto),
     ).toThrow(SearchException);
 
     // value length > 100

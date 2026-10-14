@@ -2,9 +2,28 @@ import { SortOption } from '../../common/enums';
 import { SearchErrorCode } from '../../common/errors/error-codes';
 import { SearchException } from '../../common/errors/search.exception';
 import { ParsedSearchQuery } from '../query-parser';
-import { ElasticsearchQueryBuilder, SearchRequestBuilder } from './search-request.builder';
+import { SearchRequestBuilder } from './search-request.builder';
 
-describe('SearchRequestBuilder / ElasticsearchQueryBuilder', () => {
+function getTermValue(clause: unknown, field: string): unknown {
+  const c = clause as { term?: Record<string, unknown> } | undefined;
+  return c?.term?.[field];
+}
+
+function getTermsValues(clause: unknown, field: string): unknown[] | undefined {
+  const c = clause as { terms?: Record<string, unknown[]> } | undefined;
+  return c?.terms?.[field];
+}
+
+function getRangeField(
+  clause: unknown,
+  field: string,
+): { gte?: number; lte?: number } | undefined {
+  const c = clause as
+    { range?: Record<string, { gte?: number; lte?: number }> } | undefined;
+  return c?.range?.[field];
+}
+
+describe('SearchRequestBuilder', () => {
   let builder: SearchRequestBuilder;
 
   beforeEach(() => {
@@ -29,12 +48,12 @@ describe('SearchRequestBuilder / ElasticsearchQueryBuilder', () => {
     expect(boolQuery).toBeDefined();
     expect(boolQuery?.filter).toBeDefined();
 
-    const filters = (Array.isArray(boolQuery?.filter)
-      ? boolQuery?.filter
-      : [boolQuery?.filter]) as any[];
+    const filters = (
+      Array.isArray(boolQuery?.filter) ? boolQuery?.filter : [boolQuery?.filter]
+    ) as unknown[];
 
     const hasPublishedFilter = filters.some((f) => {
-      return (f.term as any)?.visibility_status === 'PUBLISHED';
+      return getTermValue(f, 'visibility_status') === 'PUBLISHED';
     });
 
     expect(hasPublishedFilter).toBe(true);
@@ -60,7 +79,9 @@ describe('SearchRequestBuilder / ElasticsearchQueryBuilder', () => {
     expect(multiMatch.fields).toEqual(['title^3', 'brand^2', 'description']);
     expect(multiMatch.operator).toBe('and');
 
-    const shouldClause = (boolQuery?.should as Array<Record<string, unknown>>)[0];
+    const shouldClause = (
+      boolQuery?.should as Array<Record<string, unknown>>
+    )[0];
     const termExact = shouldClause.term as {
       title_exact: { value: string; boost: number };
     };
@@ -68,10 +89,12 @@ describe('SearchRequestBuilder / ElasticsearchQueryBuilder', () => {
     expect(termExact.title_exact.boost).toBe(5);
 
     // Visibility filter is preserved
-    const filters = boolQuery?.filter as Array<Record<string, any>>;
-    expect(filters.some((f) => (f.term as any)?.visibility_status === 'PUBLISHED')).toBe(
-      true,
-    );
+    const filters = (
+      Array.isArray(boolQuery?.filter) ? boolQuery?.filter : [boolQuery?.filter]
+    ) as unknown[];
+    expect(
+      filters.some((f) => getTermValue(f, 'visibility_status') === 'PUBLISHED'),
+    ).toBe(true);
   });
 
   it('SQ-U-23: sort="price_asc" produces price asc and product_id asc tie-break', () => {
@@ -132,13 +155,19 @@ describe('SearchRequestBuilder / ElasticsearchQueryBuilder', () => {
     ]);
   });
 
-  it('SQ-U-26: include_facets=false omits aggs property from ES search request', () => {
+  it('SQ-U-26: include_facets=false includes index_as_of agg but omits facet aggs', () => {
     const req = builder.build({
       ...baseParsed,
       includeFacets: false,
     });
 
-    expect(req.aggs).toBeUndefined();
+    expect(req.aggs).toBeDefined();
+    expect(req.aggs?.index_as_of).toEqual({
+      max: { field: 'indexed_at' },
+    });
+    expect(req.aggs?.category).toBeUndefined();
+    expect(req.aggs?.brand).toBeUndefined();
+    expect(req.aggs?.price).toBeUndefined();
   });
 
   it('SQ-U-27: include_facets=true creates fixed price range aggregation with D9 buckets', () => {
@@ -169,12 +198,11 @@ describe('SearchRequestBuilder / ElasticsearchQueryBuilder', () => {
     ]);
   });
 
-  it('builds post_filter containing all selected filters (category, brand, price, attributes)', () => {
+  it('builds post_filter containing all selected facet filters (category, brand, price, attributes)', () => {
     const req = builder.build({
       ...baseParsed,
       filters: {
         categoryId: 'cat-phone',
-        shopId: 'shop-001',
         brands: ['Apple', 'Samsung'],
         minPrice: 5000000,
         maxPrice: 20000000,
@@ -186,20 +214,52 @@ describe('SearchRequestBuilder / ElasticsearchQueryBuilder', () => {
     });
 
     expect(req.post_filter).toBeDefined();
-    const postBool = (req.post_filter as { bool?: { filter?: unknown[] } })?.bool;
+    const postBool = (req.post_filter as { bool?: { filter?: unknown[] } })
+      ?.bool;
     expect(postBool?.filter).toBeDefined();
-    const filters = postBool?.filter as any[];
+    const filters = (postBool?.filter || []) as unknown[];
 
-    expect(filters.some((f) => (f.term as any)?.category_ids === 'cat-phone')).toBe(true);
-    expect(filters.some((f) => (f.term as any)?.shop_id === 'shop-001')).toBe(true);
-    expect(filters.some((f) => (f.terms as any)?.brand?.includes('Apple'))).toBe(true);
-    expect(filters.some((f) => (f.range as any)?.price?.gte === 5000000)).toBe(true);
-    expect(filters.some((f) => (f.term as any)?.attribute_pairs === 'color=Đen')).toBe(true);
+    expect(
+      filters.some((f) => getTermValue(f, 'category_ids') === 'cat-phone'),
+    ).toBe(true);
     expect(
       filters.some((f) =>
-        (f.terms as any)?.attribute_pairs?.includes('capacity_liter=256GB'),
+        (getTermsValues(f, 'brand') as string[] | undefined)?.includes('Apple'),
       ),
     ).toBe(true);
+    expect(
+      filters.some((f) => getRangeField(f, 'price')?.gte === 5000000),
+    ).toBe(true);
+    expect(
+      filters.some((f) => getTermValue(f, 'attribute_pairs') === 'color=Đen'),
+    ).toBe(true);
+    expect(
+      filters.some((f) =>
+        (
+          getTermsValues(f, 'attribute_pairs') as string[] | undefined
+        )?.includes('capacity_liter=256GB'),
+      ),
+    ).toBe(true);
+  });
+
+  it('places shop_id in main query bool.filter, NOT in post_filter or facet aggs', () => {
+    const req = builder.build({
+      ...baseParsed,
+      filters: {
+        ...baseParsed.filters,
+        shopId: 'shop-001',
+      },
+    });
+
+    const boolFilters = (
+      Array.isArray(req.query?.bool?.filter)
+        ? req.query?.bool?.filter
+        : [req.query?.bool?.filter]
+    ) as unknown[];
+    expect(
+      boolFilters.some((f) => getTermValue(f, 'shop_id') === 'shop-001'),
+    ).toBe(true);
+    expect(req.post_filter).toBeUndefined();
   });
 
   it('builds multi-select facet aggregations excluding own filter per D10', () => {
@@ -219,25 +279,36 @@ describe('SearchRequestBuilder / ElasticsearchQueryBuilder', () => {
     const aggs = req.aggs!;
 
     // Category facet should NOT contain category filter
-    const catAggFilter = (aggs.category as { filter?: { bool?: { filter?: any[] } } })
-      .filter?.bool?.filter as any[];
-    expect(catAggFilter.some((f) => (f.term as any)?.category_ids)).toBe(false);
-    expect(catAggFilter.some((f) => (f.term as any)?.brand === 'Apple')).toBe(true);
-
-    // Brand facet should NOT contain brand filter
-    const brandAggFilter = (aggs.brand as { filter?: { bool?: { filter?: any[] } } })
-      .filter?.bool?.filter as any[];
-    expect(
-      brandAggFilter.some((f) => (f.term as any)?.brand || (f.terms as any)?.brand),
-    ).toBe(false);
-    expect(brandAggFilter.some((f) => (f.term as any)?.category_ids === 'cat-phone')).toBe(
+    const catAggFilter = ((
+      aggs.category as { filter?: { bool?: { filter?: unknown[] } } }
+    ).filter?.bool?.filter || []) as unknown[];
+    expect(catAggFilter.some((f) => getTermValue(f, 'category_ids'))).toBe(
+      false,
+    );
+    expect(catAggFilter.some((f) => getTermValue(f, 'brand') === 'Apple')).toBe(
       true,
     );
 
+    // Brand facet should NOT contain brand filter
+    const brandAggFilter = ((
+      aggs.brand as { filter?: { bool?: { filter?: unknown[] } } }
+    ).filter?.bool?.filter || []) as unknown[];
+    expect(
+      brandAggFilter.some(
+        (f) => getTermValue(f, 'brand') || getTermsValues(f, 'brand'),
+      ),
+    ).toBe(false);
+    expect(
+      brandAggFilter.some(
+        (f) => getTermValue(f, 'category_ids') === 'cat-phone',
+      ),
+    ).toBe(true);
+
     // Price facet should NOT contain price filter
-    const priceAggFilter = (aggs.price as { filter?: { bool?: { filter?: any[] } } })
-      .filter?.bool?.filter as any[];
-    expect(priceAggFilter.some((f) => (f.range as any)?.price)).toBe(false);
+    const priceAggFilter = ((
+      aggs.price as { filter?: { bool?: { filter?: unknown[] } } }
+    ).filter?.bool?.filter || []) as unknown[];
+    expect(priceAggFilter.some((f) => getRangeField(f, 'price'))).toBe(false);
 
     // Attribute facets (D23): selected key capacity_liter
     expect(aggs['attr_sel_capacity_liter']).toBeDefined();
@@ -255,20 +326,20 @@ describe('SearchRequestBuilder / ElasticsearchQueryBuilder', () => {
     expect(maxAgg.max?.field).toBe('indexed_at');
   });
 
-  it('restricts _source to product card fields', () => {
+  it('restricts _source to product card fields and does not include shop_id or shop_name', () => {
     const req = builder.build(baseParsed);
-    expect(req._source).toEqual(
-      expect.arrayContaining([
-        'product_id',
-        'title',
-        'slug',
-        'shop',
-        'price',
-        'currency',
-        'cover_url',
-        'rating_avg',
-      ]),
-    );
+    expect(req._source).toEqual([
+      'product_id',
+      'title',
+      'slug',
+      'shop',
+      'price',
+      'currency',
+      'cover_url',
+      'rating_avg',
+    ]);
+    expect((req._source as string[]).includes('shop_id')).toBe(false);
+    expect((req._source as string[]).includes('shop_name')).toBe(false);
   });
 
   it('rejects page * size > 10000 with SEARCH_INVALID_INPUT', () => {
@@ -293,9 +364,8 @@ describe('SearchRequestBuilder / ElasticsearchQueryBuilder', () => {
     }
   });
 
-  it('is accessible via alias ElasticsearchQueryBuilder', () => {
-    const esBuilder = new ElasticsearchQueryBuilder();
-    const req = esBuilder.build(baseParsed);
+  it('builds request via instance method build()', () => {
+    const req = builder.build(baseParsed);
     expect(req).toBeDefined();
   });
 });

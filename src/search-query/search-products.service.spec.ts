@@ -7,6 +7,7 @@ import {
   CategoryProjection,
   ICategoryProjection,
 } from '../product-index/interfaces';
+import { SearchProductsQueryDto } from './dto/search-products.query';
 import { SearchRequestBuilder } from './es/search-request.builder';
 import { ParsedSearchQuery, QueryParser } from './query-parser';
 import { SearchResultMapper } from './result.mapper';
@@ -106,7 +107,9 @@ describe('SearchProductsService', () => {
   });
 
   it('handles timeout case: throws 504 SEARCH_TIMEOUT when ES client throws TimeoutError (D5)', async () => {
-    mockSearchFn.mockRejectedValue(new errors.TimeoutError('ES Request timeout'));
+    mockSearchFn.mockRejectedValue(
+      new errors.TimeoutError('ES Request timeout'),
+    );
 
     const parsed: ParsedSearchQuery = {
       text: 'slowquery',
@@ -132,7 +135,9 @@ describe('SearchProductsService', () => {
   it('maps ES ConnectionError to 503 SEARCH_UNAVAILABLE (D5)', async () => {
     mockSearchFn.mockRejectedValue(new errors.ConnectionError('ES Down'));
 
-    const parsed = QueryParser.parse({ q: 'test' } as unknown as any);
+    const parsed = QueryParser.parse({
+      q: 'test',
+    } as unknown as SearchProductsQueryDto);
     try {
       await service.search(parsed);
       fail('Expected SearchException');
@@ -146,13 +151,17 @@ describe('SearchProductsService', () => {
   it('maps missing alias/index 404 to 503 SEARCH_INDEX_NOT_READY (D5)', async () => {
     const resErr = new errors.ResponseError({
       statusCode: 404,
-      body: { error: { type: 'index_not_found_exception', reason: 'no such index' } },
+      body: {
+        error: { type: 'index_not_found_exception', reason: 'no such index' },
+      },
       warnings: [],
       headers: {},
     } as unknown as ConstructorParameters<typeof errors.ResponseError>[0]);
     mockSearchFn.mockRejectedValue(resErr);
 
-    const parsed = QueryParser.parse({ q: 'test' } as unknown as any);
+    const parsed = QueryParser.parse({
+      q: 'test',
+    } as unknown as SearchProductsQueryDto);
     try {
       await service.search(parsed);
       fail('Expected SearchException');
@@ -187,7 +196,9 @@ describe('SearchProductsService', () => {
     });
 
     // 1. Without category filter -> root categories only (cat-tech, cat-fashion), unknown dropped
-    const rootResult = await service.search(QueryParser.parse({} as unknown as any));
+    const rootResult = await service.search(
+      QueryParser.parse({} as unknown as SearchProductsQueryDto),
+    );
     expect(rootResult.meta.facets?.category).toEqual([
       { category_id: 'cat-tech', name: 'Đồ công nghệ', count: 6 },
       { category_id: 'cat-fashion', name: 'Thời trang', count: 2 },
@@ -195,7 +206,9 @@ describe('SearchProductsService', () => {
 
     // 2. With category_id=cat-tech -> direct children only (cat-phone, cat-laptop)
     const techResult = await service.search(
-      QueryParser.parse({ category_id: 'cat-tech' } as unknown as any),
+      QueryParser.parse({
+        category_id: 'cat-tech',
+      } as unknown as SearchProductsQueryDto),
     );
     expect(techResult.meta.facets?.category).toEqual([
       { category_id: 'cat-phone', name: 'Điện thoại', count: 4 },
@@ -208,7 +221,9 @@ describe('SearchProductsService', () => {
       hits: { total: 1, hits: [] },
     });
 
-    const parsed = QueryParser.parse({ include_facets: false } as unknown as any);
+    const parsed = QueryParser.parse({
+      include_facets: false,
+    } as unknown as SearchProductsQueryDto);
     const result = await service.search(parsed);
 
     expect(result.meta.facets).toBeUndefined();
@@ -245,7 +260,7 @@ describe('SearchProductsService', () => {
 
     const parsed = QueryParser.parse({
       attribute: { color: 'Đen' },
-    } as unknown as any);
+    } as unknown as SearchProductsQueryDto);
     const result = await service.search(parsed);
 
     const attrFacets = result.meta.facets?.attributes;
@@ -259,5 +274,64 @@ describe('SearchProductsService', () => {
       { value: '512GB', count: 3 },
     ]);
     expect(attrFacets?.size).toEqual([{ value: 'L', count: 2 }]);
+  });
+
+  it('TECHLEAD-1: extracts index_as_of from max agg on indexed_at even when include_facets=false', async () => {
+    mockSearchFn.mockResolvedValue({
+      hits: { total: 1, hits: [] },
+      aggregations: {
+        index_as_of: { value_as_string: '2026-09-01T15:30:00.000Z' },
+      },
+    });
+
+    const parsed = QueryParser.parse({
+      include_facets: false,
+    } as unknown as SearchProductsQueryDto);
+    const result = await service.search(parsed);
+
+    expect(result.meta.index_as_of).toBe('2026-09-01T15:30:00.000Z');
+    expect(result.meta.facets).toBeUndefined();
+  });
+
+  it('TECHLEAD-1: returns index_as_of: null when index_as_of agg has no value (empty index)', async () => {
+    mockSearchFn.mockResolvedValue({
+      hits: { total: 0, hits: [] },
+      aggregations: {
+        index_as_of: { value: null },
+      },
+    });
+
+    const parsed = QueryParser.parse({
+      include_facets: false,
+    } as unknown as SearchProductsQueryDto);
+    const result = await service.search(parsed);
+
+    expect(result.meta.index_as_of).toBeNull();
+  });
+
+  it('TECHLEAD-1: index_as_of is never invented from first hit or current date', async () => {
+    mockSearchFn.mockResolvedValue({
+      hits: {
+        total: 1,
+        hits: [
+          {
+            _source: {
+              product_id: 'prod-001',
+              indexed_at: '2026-01-01T00:00:00Z',
+            },
+          },
+        ],
+      },
+      aggregations: {
+        index_as_of: { value: null },
+      },
+    });
+
+    const parsed = QueryParser.parse({
+      include_facets: false,
+    } as unknown as SearchProductsQueryDto);
+    const result = await service.search(parsed);
+
+    expect(result.meta.index_as_of).toBeNull();
   });
 });

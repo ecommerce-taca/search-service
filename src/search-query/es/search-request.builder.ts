@@ -43,10 +43,6 @@ function buildSort(sort: SortOption): estypes.Sort {
 @Injectable()
 export class SearchRequestBuilder {
   build(parsed: ParsedSearchQuery): estypes.SearchRequest {
-    return SearchRequestBuilder.build(parsed);
-  }
-
-  static build(parsed: ParsedSearchQuery): estypes.SearchRequest {
     if (parsed.page * parsed.size > 10000) {
       throw new SearchException(
         SearchErrorCode.SEARCH_INVALID_INPUT,
@@ -55,9 +51,17 @@ export class SearchRequestBuilder {
       );
     }
 
-    // 1. Base query: bool.filter PUBLISHED + optional full-text
+    // 1. Base query: bool.filter PUBLISHED + (shop_id if present) + optional full-text
+    const filterClauses: estypes.QueryDslQueryContainer[] = [
+      { term: { visibility_status: 'PUBLISHED' } },
+    ];
+
+    if (parsed.filters.shopId) {
+      filterClauses.push({ term: { shop_id: parsed.filters.shopId } });
+    }
+
     const boolQuery: estypes.QueryDslBoolQuery = {
-      filter: [{ term: { visibility_status: 'PUBLISHED' } }],
+      filter: filterClauses,
     };
 
     if (parsed.text) {
@@ -86,15 +90,11 @@ export class SearchRequestBuilder {
       bool: boolQuery,
     };
 
-    // 2. Build individual filter clauses
+    // 2. Build individual facet filter clauses (category, brand, price, attributes)
+    // Note: shop_id is not a facet filter; it is placed directly in main query bool.filter.
     let categoryFilter: estypes.QueryDslQueryContainer | undefined;
     if (parsed.filters.categoryId) {
       categoryFilter = { term: { category_ids: parsed.filters.categoryId } };
-    }
-
-    let shopFilter: estypes.QueryDslQueryContainer | undefined;
-    if (parsed.filters.shopId) {
-      shopFilter = { term: { shop_id: parsed.filters.shopId } };
     }
 
     let brandFilter: estypes.QueryDslQueryContainer | undefined;
@@ -132,34 +132,37 @@ export class SearchRequestBuilder {
       }
     }
 
-    // 3. Post filter: combines all selected filters
-    const allSelectedFilters: estypes.QueryDslQueryContainer[] = [];
-    if (categoryFilter) allSelectedFilters.push(categoryFilter);
-    if (shopFilter) allSelectedFilters.push(shopFilter);
-    if (brandFilter) allSelectedFilters.push(brandFilter);
-    if (priceFilter) allSelectedFilters.push(priceFilter);
+    // 3. Post filter: combines all selected facet filters
+    const allSelectedFacetFilters: estypes.QueryDslQueryContainer[] = [];
+    if (categoryFilter) allSelectedFacetFilters.push(categoryFilter);
+    if (brandFilter) allSelectedFacetFilters.push(brandFilter);
+    if (priceFilter) allSelectedFacetFilters.push(priceFilter);
     for (const clause of Object.values(attrFilters)) {
-      allSelectedFilters.push(clause);
+      allSelectedFacetFilters.push(clause);
     }
 
     let postFilter: estypes.QueryDslQueryContainer | undefined;
-    if (allSelectedFilters.length === 1) {
-      postFilter = allSelectedFilters[0];
-    } else if (allSelectedFilters.length > 1) {
+    if (allSelectedFacetFilters.length === 1) {
+      postFilter = allSelectedFacetFilters[0];
+    } else if (allSelectedFacetFilters.length > 1) {
       postFilter = {
         bool: {
-          filter: allSelectedFilters,
+          filter: allSelectedFacetFilters,
         },
       };
     }
 
-    // 4. Facets aggregations (omitted when includeFacets = false)
-    let aggs:
-      Record<string, estypes.AggregationsAggregationContainer> | undefined;
+    // 4. Aggregations: index_as_of max agg is ALWAYS included (also when includeFacets = false)
+    const aggs: Record<string, estypes.AggregationsAggregationContainer> = {
+      index_as_of: {
+        max: {
+          field: 'indexed_at',
+        },
+      },
+    };
 
     if (parsed.includeFacets) {
       const nonCategoryFilters = [
-        shopFilter,
         brandFilter,
         priceFilter,
         ...Object.values(attrFilters),
@@ -167,59 +170,52 @@ export class SearchRequestBuilder {
 
       const nonBrandFilters = [
         categoryFilter,
-        shopFilter,
         priceFilter,
         ...Object.values(attrFilters),
       ].filter(Boolean) as estypes.QueryDslQueryContainer[];
 
       const nonPriceFilters = [
         categoryFilter,
-        shopFilter,
         brandFilter,
         ...Object.values(attrFilters),
       ].filter(Boolean) as estypes.QueryDslQueryContainer[];
 
-      aggs = {
-        category: {
-          filter: makeFilterAgg(nonCategoryFilters),
-          aggs: {
-            values: {
-              terms: {
-                field: 'category_ids',
-                size: 200,
-              },
+      aggs.category = {
+        filter: makeFilterAgg(nonCategoryFilters),
+        aggs: {
+          values: {
+            terms: {
+              field: 'category_ids',
+              size: 200,
             },
           },
         },
-        brand: {
-          filter: makeFilterAgg(nonBrandFilters),
-          aggs: {
-            values: {
-              terms: {
-                field: 'brand',
-                size: 50,
-              },
+      };
+
+      aggs.brand = {
+        filter: makeFilterAgg(nonBrandFilters),
+        aggs: {
+          values: {
+            terms: {
+              field: 'brand',
+              size: 50,
             },
           },
         },
-        price: {
-          filter: makeFilterAgg(nonPriceFilters),
-          aggs: {
-            values: {
-              range: {
-                field: 'price',
-                ranges: [
-                  { to: 5000000 },
-                  { from: 5000000, to: 20000000 },
-                  { from: 20000000 },
-                ],
-              },
+      };
+
+      aggs.price = {
+        filter: makeFilterAgg(nonPriceFilters),
+        aggs: {
+          values: {
+            range: {
+              field: 'price',
+              ranges: [
+                { to: 5000000 },
+                { from: 5000000, to: 20000000 },
+                { from: 20000000 },
+              ],
             },
-          },
-        },
-        index_as_of: {
-          max: {
-            field: 'indexed_at',
           },
         },
       };
@@ -232,7 +228,6 @@ export class SearchRequestBuilder {
           .map(([, f]) => f);
         const nonKFilters = [
           categoryFilter,
-          shopFilter,
           brandFilter,
           priceFilter,
           ...otherAttrFilters,
@@ -244,7 +239,7 @@ export class SearchRequestBuilder {
             values: {
               terms: {
                 field: 'attribute_pairs',
-                include: `^${selKey}=.*`,
+                include: `${selKey}=.*`,
                 size: 30,
               },
             },
@@ -253,10 +248,10 @@ export class SearchRequestBuilder {
       }
 
       const excludeRegex =
-        selectedKeys.length > 0 ? `^(${selectedKeys.join('|')})=.*` : undefined;
+        selectedKeys.length > 0 ? `(${selectedKeys.join('|')})=.*` : undefined;
 
       aggs['attr_rest'] = {
-        filter: makeFilterAgg(allSelectedFilters),
+        filter: makeFilterAgg(allSelectedFacetFilters),
         aggs: {
           values: {
             terms: {
@@ -280,25 +275,18 @@ export class SearchRequestBuilder {
         'title',
         'slug',
         'shop',
-        'shop_id',
-        'shop_name',
         'price',
         'currency',
         'cover_url',
         'rating_avg',
       ],
+      aggs,
     };
 
     if (postFilter) {
       searchRequest.post_filter = postFilter;
     }
-    if (aggs) {
-      searchRequest.aggs = aggs;
-    }
 
     return searchRequest;
   }
 }
-
-export const ElasticsearchQueryBuilder = SearchRequestBuilder;
-export type ElasticsearchQueryBuilder = SearchRequestBuilder;

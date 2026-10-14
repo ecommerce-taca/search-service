@@ -1,4 +1,7 @@
-import { RequestContext, RequestContextData } from '../common/context/request-context';
+import {
+  RequestContext,
+  RequestContextData,
+} from '../common/context/request-context';
 import { SortOption } from '../common/enums';
 import { SearchProductsQueryDto } from './dto/search-products.query';
 import { ParsedSearchQuery, QueryParser } from './query-parser';
