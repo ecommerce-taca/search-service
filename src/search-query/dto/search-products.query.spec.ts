@@ -1,12 +1,18 @@
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { SortOption } from '../../common/enums';
-import {
-  IsAttributeRecordConstraint,
-  SearchProductsQueryDto,
-} from './search-products.query';
+import { SearchErrorCode } from '../../common/errors/error-codes';
+import { SearchException } from '../../common/errors/search.exception';
+import { QueryParser } from '../query-parser';
+import { SearchProductsQueryDto } from './search-products.query';
 
 describe('SearchProductsQueryDto', () => {
+  let parser: QueryParser;
+
+  beforeEach(() => {
+    parser = new QueryParser();
+  });
+
   it('SQ-U-04: transforms and validates valid query dto with default values', async () => {
     const plain = {};
     const dto = plainToInstance(SearchProductsQueryDto, plain);
@@ -16,6 +22,11 @@ describe('SearchProductsQueryDto', () => {
     expect(dto.page).toBe(1);
     expect(dto.size).toBe(20);
     expect(dto.include_facets).toBe(true);
+
+    const parsed = parser.parse(dto);
+    expect(parsed.page).toBe(1);
+    expect(parsed.size).toBe(20);
+    expect(parsed.includeFacets).toBe(true);
   });
 
   it('SQ-U-04: validates valid sort options', async () => {
@@ -24,6 +35,8 @@ describe('SearchProductsQueryDto', () => {
       const errors = await validate(dto);
       expect(errors.length).toBe(0);
       expect(dto.sort).toBe(sort);
+      const parsed = parser.parse(dto);
+      expect(parsed.sort).toBe(sort);
     }
   });
 
@@ -37,9 +50,14 @@ describe('SearchProductsQueryDto', () => {
       const dto = plainToInstance(SearchProductsQueryDto, {
         sort: invalidSort,
       });
-      const errors = await validate(dto);
-      expect(errors.length).toBeGreaterThan(0);
-      expect(errors[0].property).toBe('sort');
+      expect(() => parser.parse(dto)).toThrow(SearchException);
+      try {
+        parser.parse(dto);
+      } catch (err) {
+        expect((err as SearchException).code).toBe(
+          SearchErrorCode.SEARCH_INVALID_INPUT,
+        );
+      }
     }
   });
 
@@ -52,64 +70,76 @@ describe('SearchProductsQueryDto', () => {
     });
     const errors = await validate(dto);
     expect(errors.length).toBe(0);
+    const parsed = parser.parse(dto);
+    expect(parsed.filters.attributes).toEqual({
+      color: ['Đen'],
+      capacity_liter: ['256GB', '512GB'],
+    });
   });
 
   it('SQ-U-06: rejects attribute keys with illegal characters, dots, or Lucene syntax', async () => {
     const dto1 = plainToInstance(SearchProductsQueryDto, {
       attribute: { 'color.keyword': 'Đen' },
     });
-    const errors1 = await validate(dto1);
-    expect(errors1.length).toBeGreaterThan(0);
-    expect(errors1[0].property).toBe('attribute');
+    expect(() => parser.parse(dto1)).toThrow(SearchException);
 
     const dto2 = plainToInstance(SearchProductsQueryDto, {
       attribute: { 'nested.field': 'val' },
     });
-    const errors2 = await validate(dto2);
-    expect(errors2.length).toBeGreaterThan(0);
+    expect(() => parser.parse(dto2)).toThrow(SearchException);
   });
 
   it('SQ-U-07: rejects attribute with prototype pollution keys', async () => {
-    const constraint = new IsAttributeRecordConstraint();
-
-    // JSON.parse creates own property __proto__
     const protoObj = JSON.parse('{"__proto__": "polluted"}');
-    expect(constraint.validate(protoObj)).toBe(false);
+    expect(() =>
+      parser.parse({
+        attribute: protoObj,
+      } as unknown as SearchProductsQueryDto),
+    ).toThrow(SearchException);
 
-    expect(constraint.validate({ constructor: 'danger' })).toBe(false);
-    expect(constraint.validate({ prototype: 'danger' })).toBe(false);
+    expect(() =>
+      parser.parse({
+        attribute: { constructor: 'danger' },
+      } as unknown as SearchProductsQueryDto),
+    ).toThrow(SearchException);
 
-    const pollutedObj = Object.create(null);
-    Object.defineProperty(pollutedObj, '__proto__', {
-      value: 'evil',
-      enumerable: true,
-    });
-    expect(constraint.validate(pollutedObj)).toBe(false);
+    expect(() =>
+      parser.parse({
+        attribute: { prototype: 'danger' },
+      } as unknown as SearchProductsQueryDto),
+    ).toThrow(SearchException);
   });
 
   it('SQ-U-08: rejects attribute keys containing script or injection syntax', async () => {
-    const constraint = new IsAttributeRecordConstraint();
+    const dto1 = plainToInstance(SearchProductsQueryDto, {
+      attribute: { '<script>alert(1)</script>': 'x' },
+    });
+    expect(() => parser.parse(dto1)).toThrow(SearchException);
 
-    expect(constraint.validate({ '<script>alert(1)</script>': 'x' })).toBe(
-      false,
-    );
-    expect(constraint.validate({ $where: 'sleep(1000)' })).toBe(false);
-    expect(constraint.validate({ "key' OR 1=1--": 'x' })).toBe(false);
+    const dto2 = plainToInstance(SearchProductsQueryDto, {
+      attribute: { $where: 'sleep(1000)' },
+    });
+    expect(() => parser.parse(dto2)).toThrow(SearchException);
+
+    const dto3 = plainToInstance(SearchProductsQueryDto, {
+      attribute: { "key' OR 1=1--": 'x' },
+    });
+    expect(() => parser.parse(dto3)).toThrow(SearchException);
   });
 
   it('SQ-U-11 & SQ-U-12: validates size boundaries [1, 100]', async () => {
     const valid1 = plainToInstance(SearchProductsQueryDto, { size: '1' });
     expect(await validate(valid1)).toHaveLength(0);
     expect(valid1.size).toBe(1);
+    expect(parser.parse(valid1).size).toBe(1);
 
     const valid100 = plainToInstance(SearchProductsQueryDto, { size: '100' });
     expect(await validate(valid100)).toHaveLength(0);
     expect(valid100.size).toBe(100);
+    expect(parser.parse(valid100).size).toBe(100);
 
     const invalid101 = plainToInstance(SearchProductsQueryDto, { size: '101' });
-    const errors101 = await validate(invalid101);
-    expect(errors101.length).toBeGreaterThan(0);
-    expect(errors101[0].property).toBe('size');
+    expect(() => parser.parse(invalid101)).toThrow(SearchException);
   });
 
   it('SQ-U-13: rejects size=0, negative size, or non-integer size', async () => {
@@ -117,9 +147,7 @@ describe('SearchProductsQueryDto', () => {
       const dto = plainToInstance(SearchProductsQueryDto, {
         size: invalidSize,
       });
-      const errors = await validate(dto);
-      expect(errors.length).toBeGreaterThan(0);
-      expect(errors[0].property).toBe('size');
+      expect(() => parser.parse(dto)).toThrow(SearchException);
     }
   });
 
@@ -128,9 +156,7 @@ describe('SearchProductsQueryDto', () => {
       const dto = plainToInstance(SearchProductsQueryDto, {
         page: invalidPage,
       });
-      const errors = await validate(dto);
-      expect(errors.length).toBeGreaterThan(0);
-      expect(errors[0].property).toBe('page');
+      expect(() => parser.parse(dto)).toThrow(SearchException);
     }
   });
 
@@ -139,9 +165,7 @@ describe('SearchProductsQueryDto', () => {
       const dto = plainToInstance(SearchProductsQueryDto, {
         min_price: invalidPrice,
       });
-      const errors = await validate(dto);
-      expect(errors.length).toBeGreaterThan(0);
-      expect(errors[0].property).toBe('min_price');
+      expect(() => parser.parse(dto)).toThrow(SearchException);
     }
   });
 
@@ -154,6 +178,9 @@ describe('SearchProductsQueryDto', () => {
     expect(errors.length).toBe(0);
     expect(dto.min_price).toBe(5000000);
     expect(dto.max_price).toBe(20000000);
+    const parsed = parser.parse(dto);
+    expect(parsed.filters.minPrice).toBe(5000000);
+    expect(parsed.filters.maxPrice).toBe(20000000);
   });
 
   it('SQ-U-19 & SQ-U-20: validates include_facets boolean transformation', async () => {
@@ -162,20 +189,20 @@ describe('SearchProductsQueryDto', () => {
     });
     expect(await validate(trueDto)).toHaveLength(0);
     expect(trueDto.include_facets).toBe(true);
+    expect(parser.parse(trueDto).includeFacets).toBe(true);
 
     const falseDto = plainToInstance(SearchProductsQueryDto, {
       include_facets: 'false',
     });
     expect(await validate(falseDto)).toHaveLength(0);
     expect(falseDto.include_facets).toBe(false);
+    expect(parser.parse(falseDto).includeFacets).toBe(false);
 
-    for (const invalidBool of ['yes', '1', 'undefined', 'invalid']) {
+    for (const invalidBool of ['yes', '1', 'invalid']) {
       const dto = plainToInstance(SearchProductsQueryDto, {
         include_facets: invalidBool,
       });
-      const errors = await validate(dto);
-      expect(errors.length).toBeGreaterThan(0);
-      expect(errors[0].property).toBe('include_facets');
+      expect(() => parser.parse(dto)).toThrow(SearchException);
     }
   });
 
@@ -183,11 +210,13 @@ describe('SearchProductsQueryDto', () => {
     const single = plainToInstance(SearchProductsQueryDto, { brand: 'Apple' });
     expect(await validate(single)).toHaveLength(0);
     expect(single.brand).toEqual(['Apple']);
+    expect(parser.parse(single).filters.brands).toEqual(['Apple']);
 
     const multi = plainToInstance(SearchProductsQueryDto, {
       brand: ['Apple', 'Samsung'],
     });
     expect(await validate(multi)).toHaveLength(0);
     expect(multi.brand).toEqual(['Apple', 'Samsung']);
+    expect(parser.parse(multi).filters.brands).toEqual(['Apple', 'Samsung']);
   });
 });

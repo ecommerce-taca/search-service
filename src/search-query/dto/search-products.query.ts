@@ -1,87 +1,6 @@
-import {
-  IsArray,
-  IsBoolean,
-  IsEnum,
-  IsInt,
-  IsOptional,
-  IsString,
-  Max,
-  Min,
-  Validate,
-  ValidationArguments,
-  ValidatorConstraint,
-  ValidatorConstraintInterface,
-} from 'class-validator';
 import { Transform } from 'class-transformer';
+import { Allow } from 'class-validator';
 import { SortOption } from '../../common/enums';
-
-const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
-const ATTR_KEY_REGEX = /^[a-z0-9_]{1,64}$/i;
-
-@ValidatorConstraint({ name: 'IsAttributeRecord', async: false })
-export class IsAttributeRecordConstraint implements ValidatorConstraintInterface {
-  validate(value: unknown): boolean {
-    if (value === undefined || value === null) {
-      return true;
-    }
-    if (typeof value !== 'object' || Array.isArray(value)) {
-      return false;
-    }
-
-    const obj = value as Record<string, unknown>;
-
-    if (
-      Object.prototype.hasOwnProperty.call(obj, '__proto__') ||
-      Object.prototype.hasOwnProperty.call(obj, 'constructor') ||
-      Object.prototype.hasOwnProperty.call(obj, 'prototype') ||
-      (Object.getPrototypeOf(obj) !== Object.prototype &&
-        Object.getPrototypeOf(obj) !== null)
-    ) {
-      return false;
-    }
-
-    const keys = Object.keys(obj);
-
-    if (keys.length > 10) {
-      return false;
-    }
-
-    for (const key of keys) {
-      if (DANGEROUS_KEYS.has(key)) {
-        return false;
-      }
-      if (!ATTR_KEY_REGEX.test(key)) {
-        return false;
-      }
-
-      const val = obj[key];
-      if (typeof val === 'string') {
-        if (val.length > 100) return false;
-      } else if (Array.isArray(val)) {
-        if (val.length > 20) return false;
-        for (const item of val) {
-          if (typeof item !== 'string' || item.length > 100) {
-            return false;
-          }
-        }
-      } else {
-        return false;
-      }
-    }
-
-    for (const prop of Object.getOwnPropertyNames(obj)) {
-      if (DANGEROUS_KEYS.has(prop)) {
-        return false;
-      }
-    }
-
-    return true;
-  }
-
-  defaultMessage(args: ValidationArguments): string {
-    return `Tham số '${args.property}' chứa thuộc tính không hợp lệ.`;
-  }
-}
 
 function transformPrice(val: unknown): number | typeof NaN | undefined {
   if (val === undefined || val === null || val === '') {
@@ -121,19 +40,16 @@ function transformInt(
 }
 
 export class SearchProductsQueryDto {
-  @IsOptional()
-  @IsString()
+  @Allow()
   q?: string;
 
-  @IsOptional()
-  @IsString()
+  @Allow()
   category_id?: string;
 
-  @IsOptional()
-  @IsString()
+  @Allow()
   shop_id?: string;
 
-  @IsOptional()
+  @Allow()
   @Transform(({ value }) => {
     if (value === undefined || value === null || value === '') {
       return undefined;
@@ -143,42 +59,28 @@ export class SearchProductsQueryDto {
     }
     return [value];
   })
-  @IsArray()
-  @IsString({ each: true })
   brand?: string[];
 
-  @IsOptional()
+  @Allow()
   @Transform(({ value }) => transformPrice(value))
-  @IsInt()
-  @Min(0)
-  @Max(1000000000000)
   min_price?: number;
 
-  @IsOptional()
+  @Allow()
   @Transform(({ value }) => transformPrice(value))
-  @IsInt()
-  @Min(0)
-  @Max(1000000000000)
   max_price?: number;
 
-  @IsOptional()
-  @IsEnum(SortOption)
+  @Allow()
   sort?: SortOption;
 
-  @IsOptional()
+  @Allow()
   @Transform(({ value }) => transformInt(value, 1))
-  @IsInt()
-  @Min(1)
   page: number = 1;
 
-  @IsOptional()
+  @Allow()
   @Transform(({ value }) => transformInt(value, 20))
-  @IsInt()
-  @Min(1)
-  @Max(100)
   size: number = 20;
 
-  @IsOptional()
+  @Allow()
   @Transform(({ value }) => {
     if (value === undefined || value === null || value === '') {
       return true;
@@ -189,12 +91,10 @@ export class SearchProductsQueryDto {
     if (value === false || value === 'false') {
       return false;
     }
-    return 'INVALID_BOOLEAN';
+    return value;
   })
-  @IsBoolean()
   include_facets: boolean = true;
 
-  @IsOptional()
-  @Validate(IsAttributeRecordConstraint)
+  @Allow()
   attribute?: Record<string, string | string[]>;
 }

@@ -6,7 +6,13 @@ import {
   SearchErrorCode,
 } from '../../common/errors/error-codes';
 import { SearchException } from '../../common/errors/search.exception';
+import {
+  MAX_ATTRIBUTE_FACET_VALUES,
+  MAX_REST_ATTRIBUTE_BUCKETS,
+  MAX_RESULT_WINDOW,
+} from '../constants';
 import { ParsedSearchQuery } from '../query-parser';
+import { PRICE_BUCKETS } from './price-buckets';
 
 function makeFilterAgg(
   filters: estypes.QueryDslQueryContainer[],
@@ -43,11 +49,11 @@ function buildSort(sort: SortOption): estypes.Sort {
 @Injectable()
 export class SearchRequestBuilder {
   build(parsed: ParsedSearchQuery): estypes.SearchRequest {
-    if (parsed.page * parsed.size > 10000) {
+    if (parsed.page * parsed.size > MAX_RESULT_WINDOW) {
       throw new SearchException(
         SearchErrorCode.SEARCH_INVALID_INPUT,
         ERROR_MESSAGES_MAP[SearchErrorCode.SEARCH_INVALID_INPUT],
-        ['page * size cannot exceed 10000'],
+        [`page * size cannot exceed ${MAX_RESULT_WINDOW}`],
       );
     }
 
@@ -210,11 +216,10 @@ export class SearchRequestBuilder {
           values: {
             range: {
               field: 'price',
-              ranges: [
-                { to: 5000000 },
-                { from: 5000000, to: 20000000 },
-                { from: 20000000 },
-              ],
+              ranges: PRICE_BUCKETS.map((b) => ({
+                ...(b.from !== undefined ? { from: b.from } : {}),
+                ...(b.to !== undefined ? { to: b.to } : {}),
+              })),
             },
           },
         },
@@ -240,7 +245,7 @@ export class SearchRequestBuilder {
               terms: {
                 field: 'attribute_pairs',
                 include: `${selKey}=.*`,
-                size: 30,
+                size: MAX_ATTRIBUTE_FACET_VALUES,
               },
             },
           },
@@ -257,7 +262,7 @@ export class SearchRequestBuilder {
             terms: {
               field: 'attribute_pairs',
               ...(excludeRegex ? { exclude: excludeRegex } : {}),
-              size: 300,
+              size: MAX_REST_ATTRIBUTE_BUCKETS,
             },
           },
         },

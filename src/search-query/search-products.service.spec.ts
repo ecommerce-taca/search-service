@@ -9,12 +9,14 @@ import {
 } from '../product-index/interfaces';
 import { SearchProductsQueryDto } from './dto/search-products.query';
 import { SearchRequestBuilder } from './es/search-request.builder';
+import { FacetMapper } from './facet.mapper';
 import { ParsedSearchQuery, QueryParser } from './query-parser';
 import { SearchResultMapper } from './result.mapper';
 import { SearchProductsService } from './search-products.service';
 
 describe('SearchProductsService', () => {
   let service: SearchProductsService;
+  let parser: QueryParser;
   let mockSearchFn: jest.Mock;
   let mockGetManyFn: jest.Mock;
 
@@ -97,12 +99,13 @@ describe('SearchProductsService', () => {
       resolvePathIds: jest.fn(),
     } as unknown as ICategoryProjection;
 
+    parser = new QueryParser();
     service = new SearchProductsService(
       mockEsClient,
       mockConfigService,
-      mockCategoryProjection,
       new SearchRequestBuilder(),
       new SearchResultMapper(),
+      new FacetMapper(mockCategoryProjection),
     );
   });
 
@@ -135,7 +138,7 @@ describe('SearchProductsService', () => {
   it('maps ES ConnectionError to 503 SEARCH_UNAVAILABLE (D5)', async () => {
     mockSearchFn.mockRejectedValue(new errors.ConnectionError('ES Down'));
 
-    const parsed = QueryParser.parse({
+    const parsed = parser.parse({
       q: 'test',
     } as unknown as SearchProductsQueryDto);
     try {
@@ -159,7 +162,7 @@ describe('SearchProductsService', () => {
     } as unknown as ConstructorParameters<typeof errors.ResponseError>[0]);
     mockSearchFn.mockRejectedValue(resErr);
 
-    const parsed = QueryParser.parse({
+    const parsed = parser.parse({
       q: 'test',
     } as unknown as SearchProductsQueryDto);
     try {
@@ -197,7 +200,7 @@ describe('SearchProductsService', () => {
 
     // 1. Without category filter -> root categories only (cat-tech, cat-fashion), unknown dropped
     const rootResult = await service.search(
-      QueryParser.parse({} as unknown as SearchProductsQueryDto),
+      parser.parse({} as unknown as SearchProductsQueryDto),
     );
     expect(rootResult.meta.facets?.category).toEqual([
       { category_id: 'cat-tech', name: 'Đồ công nghệ', count: 6 },
@@ -206,7 +209,7 @@ describe('SearchProductsService', () => {
 
     // 2. With category_id=cat-tech -> direct children only (cat-phone, cat-laptop)
     const techResult = await service.search(
-      QueryParser.parse({
+      parser.parse({
         category_id: 'cat-tech',
       } as unknown as SearchProductsQueryDto),
     );
@@ -221,7 +224,7 @@ describe('SearchProductsService', () => {
       hits: { total: 1, hits: [] },
     });
 
-    const parsed = QueryParser.parse({
+    const parsed = parser.parse({
       include_facets: false,
     } as unknown as SearchProductsQueryDto);
     const result = await service.search(parsed);
@@ -258,7 +261,7 @@ describe('SearchProductsService', () => {
       },
     });
 
-    const parsed = QueryParser.parse({
+    const parsed = parser.parse({
       attribute: { color: 'Đen' },
     } as unknown as SearchProductsQueryDto);
     const result = await service.search(parsed);
@@ -284,7 +287,7 @@ describe('SearchProductsService', () => {
       },
     });
 
-    const parsed = QueryParser.parse({
+    const parsed = parser.parse({
       include_facets: false,
     } as unknown as SearchProductsQueryDto);
     const result = await service.search(parsed);
@@ -301,7 +304,7 @@ describe('SearchProductsService', () => {
       },
     });
 
-    const parsed = QueryParser.parse({
+    const parsed = parser.parse({
       include_facets: false,
     } as unknown as SearchProductsQueryDto);
     const result = await service.search(parsed);
@@ -327,7 +330,7 @@ describe('SearchProductsService', () => {
       },
     });
 
-    const parsed = QueryParser.parse({
+    const parsed = parser.parse({
       include_facets: false,
     } as unknown as SearchProductsQueryDto);
     const result = await service.search(parsed);

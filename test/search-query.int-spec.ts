@@ -21,6 +21,7 @@ import {
 } from '../src/product-index/mappings';
 import { SearchProductsQueryDto } from '../src/search-query/dto/search-products.query';
 import { SearchRequestBuilder } from '../src/search-query/es/search-request.builder';
+import { FacetMapper } from '../src/search-query/facet.mapper';
 import { QueryParser } from '../src/search-query/query-parser';
 import { SearchResultMapper } from '../src/search-query/result.mapper';
 import { SearchProductsService } from '../src/search-query/search-products.service';
@@ -91,6 +92,7 @@ describe('SearchQuery (Integration on real ES cluster)', () => {
         EsCategoryProjection,
         SearchRequestBuilder,
         SearchResultMapper,
+        FacetMapper,
         QueryParser,
         SearchProductsService,
       ],
