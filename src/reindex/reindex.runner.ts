@@ -205,29 +205,4 @@ export class ReindexRunner {
     job.error_code = null;
     await this.jobRepo.update(job);
   }
-
-  async resolveReplayStartingOffsets(
-    job: ReindexJobDocument,
-  ): Promise<Record<string, Record<number, string>>> {
-    return this.kafkaReplaySource.resolveReplayStartingOffsets(job);
-  }
-
-  logSafeProgress(data: Record<string, unknown>): void {
-    const sensitiveKeys = [
-      'token',
-      'jwt',
-      'secret',
-      'raw_query',
-      'password',
-      'authorization',
-    ];
-    const sanitized: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(data)) {
-      const lower = k.toLowerCase();
-      if (!sensitiveKeys.some((s) => lower.includes(s))) {
-        sanitized[k] = v;
-      }
-    }
-    console.log(JSON.stringify(sanitized));
-  }
 }

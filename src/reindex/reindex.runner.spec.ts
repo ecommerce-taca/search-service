@@ -538,27 +538,6 @@ describe('ReindexRunner (Unit)', () => {
     });
   });
 
-  describe('Logging Redaction (RX-U-51)', () => {
-    it('[RX-U-51] Logging redaction during reindex backfill: stdout logs redact raw queries, tokens, and DSL', () => {
-      const consoleLogSpy = jest.spyOn(console, 'log').mockImplementation();
-
-      runner.logSafeProgress({
-        job_id: 'job-1',
-        step: 'BACKFILL',
-        processed: 500,
-        raw_query: 'sensitive search text',
-        jwt_token: 'Bearer eyJhbGciOi...',
-      });
-
-      expect(consoleLogSpy).toHaveBeenCalled();
-      const loggedJson = consoleLogSpy.mock.calls[0][0];
-      expect(loggedJson).not.toContain('sensitive search text');
-      expect(loggedJson).not.toContain('eyJhbGciOi');
-
-      consoleLogSpy.mockRestore();
-    });
-  });
-
   describe('Full Lifecycle, Swap & Finally Lock Release', () => {
     it('runs copy, passes gates, executes atomic alias swap, marks SWAPPED and releases lock in finally', async () => {
       const job = createBaseJob('INDEX_COPY');
