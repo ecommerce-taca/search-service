@@ -1,4 +1,8 @@
 import { Module } from '@nestjs/common';
+import { KafkaModule } from './kafka.module';
 
-@Module({})
+@Module({
+  imports: [KafkaModule],
+  exports: [KafkaModule],
+})
 export class EventConsumerModule {}
