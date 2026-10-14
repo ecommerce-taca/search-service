@@ -7,6 +7,7 @@ import { AppConfigService } from '../config/config.service';
 import { MetricsController } from './metrics.controller';
 import { MetricsMiddleware } from './metrics.middleware';
 import { MetricsService } from './metrics.service';
+import { resolveRouteTemplate } from './route-template.helper';
 
 @Global()
 @Module({
@@ -40,9 +41,7 @@ import { MetricsService } from './metrics.service';
           },
           customSuccessObject: (req, res, val: { responseTime: number }) => {
             const expressReq = req as unknown as Request;
-            const routeTemplate = expressReq.route?.path
-              ? `${expressReq.baseUrl || ''}${expressReq.route.path}`
-              : expressReq.baseUrl || expressReq.path || 'unknown';
+            const routeTemplate = resolveRouteTemplate(expressReq);
             const ctx = RequestContext.current();
             return {
               service: config.serviceName,
@@ -65,9 +64,7 @@ import { MetricsService } from './metrics.service';
             val: { responseTime: number },
           ) => {
             const expressReq = req as unknown as Request;
-            const routeTemplate = expressReq.route?.path
-              ? `${expressReq.baseUrl || ''}${expressReq.route.path}`
-              : expressReq.baseUrl || expressReq.path || 'unknown';
+            const routeTemplate = resolveRouteTemplate(expressReq);
             const ctx = RequestContext.current();
             return {
               service: config.serviceName,

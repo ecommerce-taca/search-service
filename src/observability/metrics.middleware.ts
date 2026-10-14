@@ -1,6 +1,7 @@
 import { Injectable, NestMiddleware } from '@nestjs/common';
 import { NextFunction, Request, Response } from 'express';
 import { MetricsService } from './metrics.service';
+import { resolveRouteTemplate } from './route-template.helper';
 
 @Injectable()
 export class MetricsMiddleware implements NestMiddleware {
@@ -14,9 +15,7 @@ export class MetricsMiddleware implements NestMiddleware {
       const durationSeconds = diff[0] + diff[1] / 1e9;
 
       // Extract route template rather than raw URL or query
-      const routeTemplate = req.route?.path
-        ? `${req.baseUrl || ''}${req.route.path}`
-        : req.baseUrl || req.path || 'unknown';
+      const routeTemplate = resolveRouteTemplate(req);
 
       this.metricsService.recordHttpRequestDuration(
         routeTemplate,
