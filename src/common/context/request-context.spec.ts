@@ -28,15 +28,20 @@ describe('RequestContext', () => {
   });
 
   describe('parseOrCreateTrace', () => {
-    it('should parse valid W3C traceparent and keep tracestate', () => {
+    it('should parse valid W3C traceparent, start own span, record parent_span_id, and keep tracestate', () => {
       const validTraceparent =
         '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01';
       const tracestate = 'rojo=1,congo=2';
 
       const result = parseOrCreateTrace(validTraceparent, tracestate);
       expect(result.traceId).toBe('4bf92f3577b34da6a3ce929d0e0e4736');
-      expect(result.spanId).toBe('00f067aa0ba902b7');
-      expect(result.traceparent).toBe(validTraceparent);
+      expect(result.parentSpanId).toBe('00f067aa0ba902b7');
+      expect(result.parent_span_id).toBe('00f067aa0ba902b7');
+      expect(result.spanId).toMatch(/^[0-9a-f]{16}$/);
+      expect(result.spanId).not.toBe('00f067aa0ba902b7');
+      expect(result.traceparent).toBe(
+        `00-4bf92f3577b34da6a3ce929d0e0e4736-${result.spanId}-01`,
+      );
       expect(result.tracestate).toBe(tracestate);
     });
 
@@ -44,6 +49,8 @@ describe('RequestContext', () => {
       const result = parseOrCreateTrace(undefined, undefined);
       expect(result.traceId).toMatch(/^[0-9a-f]{32}$/);
       expect(result.spanId).toMatch(/^[0-9a-f]{16}$/);
+      expect(result.parentSpanId).toBeUndefined();
+      expect(result.parent_span_id).toBeUndefined();
       expect(result.traceparent).toBe(
         `00-${result.traceId}-${result.spanId}-01`,
       );
@@ -96,6 +103,31 @@ describe('RequestContext', () => {
           const headers = buildKafkaHeaders();
           expect(headers['x-request-id']).toBe('ctx-req');
           expect(headers['traceparent']).toBe('00-tid-sid-01');
+        },
+      );
+    });
+
+    it('should propagate our generated span as parent in buildKafkaHeaders', () => {
+      const incoming =
+        '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01';
+      const trace = parseOrCreateTrace(incoming);
+
+      RequestContext.run(
+        {
+          requestId: 'req-kafka-prop',
+          traceId: trace.traceId,
+          spanId: trace.spanId,
+          parentSpanId: trace.parentSpanId,
+          parent_span_id: trace.parent_span_id,
+          traceparent: trace.traceparent,
+          actor: { roles: [], permissions: [], mfaStepUp: false },
+        },
+        () => {
+          const headers = buildKafkaHeaders();
+          expect(headers['traceparent']).toBe(trace.traceparent);
+          expect(headers['traceparent']).toContain(`-${trace.spanId}-01`);
+          expect(headers['traceparent']).not.toContain('-00f067aa0ba902b7-');
+          expect(RequestContext.getParentSpanId()).toBe('00f067aa0ba902b7');
         },
       );
     });

@@ -13,6 +13,8 @@ export interface RequestContextData {
   requestId: string;
   traceId: string;
   spanId: string;
+  parentSpanId?: string;
+  parent_span_id?: string;
   traceparent: string;
   tracestate?: string;
   actor: ActorContext;
@@ -28,6 +30,8 @@ export function parseOrCreateTrace(
 ): {
   traceId: string;
   spanId: string;
+  parentSpanId?: string;
+  parent_span_id?: string;
   traceparent: string;
   tracestate?: string;
 } {
@@ -38,25 +42,32 @@ export function parseOrCreateTrace(
     ? tracestateHeader[0]
     : tracestateHeader;
 
+  let traceId: string;
+  let parentSpanId: string | undefined;
+  let flags = '01';
+
   if (rawTraceparent && TRACEPARENT_REGEX.test(rawTraceparent)) {
     const match = rawTraceparent.match(TRACEPARENT_REGEX);
     if (match) {
-      return {
-        traceId: match[1].toLowerCase(),
-        spanId: match[2].toLowerCase(),
-        traceparent: rawTraceparent.toLowerCase(),
-        tracestate: rawTracestate,
-      };
+      traceId = match[1].toLowerCase();
+      parentSpanId = match[2].toLowerCase();
+      flags = match[3].toLowerCase();
+    } else {
+      traceId = randomBytes(16).toString('hex');
     }
+  } else {
+    traceId = randomBytes(16).toString('hex');
   }
 
-  const traceId = randomBytes(16).toString('hex');
+  // Service must start its OWN span
   const spanId = randomBytes(8).toString('hex');
-  const traceparent = `00-${traceId}-${spanId}-01`;
+  const traceparent = `00-${traceId}-${spanId}-${flags}`;
 
   return {
     traceId,
     spanId,
+    parentSpanId,
+    parent_span_id: parentSpanId,
     traceparent,
     tracestate: rawTracestate,
   };
@@ -155,6 +166,12 @@ export class RequestContext {
 
   static getSpanId(): string | undefined {
     return storage.getStore()?.spanId;
+  }
+
+  static getParentSpanId(): string | undefined {
+    return (
+      storage.getStore()?.parentSpanId || storage.getStore()?.parent_span_id
+    );
   }
 
   static getActor(): ActorContext | undefined {

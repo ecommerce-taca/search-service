@@ -22,6 +22,8 @@ export class RequestContextMiddleware implements NestMiddleware {
       requestId,
       traceId: trace.traceId,
       spanId: trace.spanId,
+      parentSpanId: trace.parentSpanId,
+      parent_span_id: trace.parent_span_id,
       traceparent: trace.traceparent,
       tracestate: trace.tracestate,
       actor,
