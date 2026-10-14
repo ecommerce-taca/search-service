@@ -24,4 +24,3 @@ export interface IConsumerStatusProvider {
 }
 
 export const CONSUMER_STATUS_PROVIDER = 'IConsumerStatusProvider';
-export const CONSUMER_STATUS_PROVIDER_TOKEN = CONSUMER_STATUS_PROVIDER;

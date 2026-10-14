@@ -68,7 +68,6 @@ export interface ICategoryProjection {
 }
 
 export const CATEGORY_PROJECTION = 'ICategoryProjection';
-export const CATEGORY_PROJECTION_TOKEN = CATEGORY_PROJECTION;
 
 export interface IIndexWriter {
   bulkUpsert(index: string, docs: ProductSearchDocument[]): Promise<void>;
@@ -83,7 +82,5 @@ export interface IIndexWriter {
 }
 
 export const PRODUCT_DOCUMENT_BUILDER = 'IProductDocumentBuilder';
-export const PRODUCT_DOCUMENT_BUILDER_TOKEN = PRODUCT_DOCUMENT_BUILDER;
 
 export const INDEX_WRITER = 'IIndexWriter';
-export const INDEX_WRITER_TOKEN = INDEX_WRITER;

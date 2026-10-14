@@ -28,21 +28,21 @@ export interface ErrorEnvelope {
 
 function isEsOrKafkaError(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false;
-  const anyErr = err as {
+  const candidate = err as {
     name?: string;
     meta?: { body?: unknown; statusCode?: number };
     [key: string]: unknown;
   };
   if (
-    anyErr.name === 'ResponseError' ||
-    anyErr.name === 'ConnectionError' ||
-    anyErr.name === 'RequestAbortedError' ||
-    anyErr.name === 'ProductNotSupportedError' ||
-    Boolean(anyErr.meta?.body) ||
-    (typeof anyErr.name === 'string' &&
-      anyErr.name.toLowerCase().includes('kafka')) ||
-    (typeof anyErr.name === 'string' &&
-      anyErr.name.toLowerCase().includes('elastic'))
+    candidate.name === 'ResponseError' ||
+    candidate.name === 'ConnectionError' ||
+    candidate.name === 'RequestAbortedError' ||
+    candidate.name === 'ProductNotSupportedError' ||
+    Boolean(candidate.meta?.body) ||
+    (typeof candidate.name === 'string' &&
+      candidate.name.toLowerCase().includes('kafka')) ||
+    (typeof candidate.name === 'string' &&
+      candidate.name.toLowerCase().includes('elastic'))
   ) {
     return true;
   }

@@ -1,4 +1,8 @@
 import { Client } from '@elastic/elasticsearch';
+import {
+  IndicesIndexSettings,
+  MappingTypeMapping,
+} from '@elastic/elasticsearch/lib/api/types';
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import {
   getConsumerStateIndex,
@@ -49,7 +53,7 @@ export class IndexBootstrapService implements OnApplicationBootstrap {
 
   private isResourceAlreadyExistsError(err: unknown): boolean {
     if (!err || typeof err !== 'object') return false;
-    const anyErr = err as {
+    const candidate = err as {
       meta?: {
         statusCode?: number;
         body?: {
@@ -61,12 +65,41 @@ export class IndexBootstrapService implements OnApplicationBootstrap {
       message?: string;
     };
     return (
-      anyErr.meta?.body?.error?.type === 'resource_already_exists_exception' ||
+      candidate.meta?.body?.error?.type ===
+        'resource_already_exists_exception' ||
       Boolean(
-        anyErr.message &&
-        anyErr.message.includes('resource_already_exists_exception'),
+        candidate.message &&
+        candidate.message.includes('resource_already_exists_exception'),
       )
     );
+  }
+
+  private async ensureIndex(
+    name: string,
+    mappings: MappingTypeMapping,
+    settings?: IndicesIndexSettings,
+  ): Promise<boolean> {
+    const exists = await this.client.indices.exists({ index: name });
+    if (!exists) {
+      try {
+        await this.client.indices.create({
+          index: name,
+          mappings,
+          ...(settings ? { settings } : {}),
+        });
+        if (settings) {
+          this.logger.log(`Created index ${name}`);
+        } else {
+          this.logger.log(`Created internal index ${name}`);
+        }
+        return true;
+      } catch (err: unknown) {
+        if (!this.isResourceAlreadyExistsError(err)) {
+          throw err;
+        }
+      }
+    }
+    return false;
   }
 
   async bootstrap(): Promise<BootstrapResult> {
@@ -85,17 +118,11 @@ export class IndexBootstrapService implements OnApplicationBootstrap {
         prefix,
       );
 
-      try {
-        await this.client.indices.create({
-          index: activeTargetIndex,
-          settings: PRODUCTS_INDEX_SETTINGS_V1,
-          mappings: PRODUCTS_INDEX_MAPPING_V1,
-        });
-      } catch (err: unknown) {
-        if (!this.isResourceAlreadyExistsError(err)) {
-          throw err;
-        }
-      }
+      await this.ensureIndex(
+        activeTargetIndex,
+        PRODUCTS_INDEX_MAPPING_V1,
+        PRODUCTS_INDEX_SETTINGS_V1,
+      );
 
       await this.client.indices.updateAliases({
         actions: [
@@ -131,7 +158,7 @@ export class IndexBootstrapService implements OnApplicationBootstrap {
           try {
             await this.client.indices.delete({ index: activeTargetIndex });
           } catch (err: unknown) {
-            this.logger.debug?.(
+            this.logger.debug(
               `Index ${activeTargetIndex} already deleted: ${err}`,
             );
           }
@@ -149,66 +176,24 @@ export class IndexBootstrapService implements OnApplicationBootstrap {
 
     // 2. Ensure search-consumer-state index exists
     const consumerStateIndex = getConsumerStateIndex(prefix);
-    let consumerStateCreated = false;
-    const consumerStateExists = await this.client.indices.exists({
-      index: consumerStateIndex,
-    });
-    if (!consumerStateExists) {
-      try {
-        await this.client.indices.create({
-          index: consumerStateIndex,
-          mappings: CONSUMER_STATE_MAPPING_V1,
-        });
-        consumerStateCreated = true;
-        this.logger.log(`Created internal index ${consumerStateIndex}`);
-      } catch (err: unknown) {
-        if (!this.isResourceAlreadyExistsError(err)) {
-          throw err;
-        }
-      }
-    }
+    const consumerStateCreated = await this.ensureIndex(
+      consumerStateIndex,
+      CONSUMER_STATE_MAPPING_V1,
+    );
 
     // 3. Ensure search-reindex-jobs index exists
     const reindexJobsIndex = getReindexJobsIndex(prefix);
-    let reindexJobsCreated = false;
-    const reindexJobsExists = await this.client.indices.exists({
-      index: reindexJobsIndex,
-    });
-    if (!reindexJobsExists) {
-      try {
-        await this.client.indices.create({
-          index: reindexJobsIndex,
-          mappings: REINDEX_JOBS_MAPPING_V1,
-        });
-        reindexJobsCreated = true;
-        this.logger.log(`Created internal index ${reindexJobsIndex}`);
-      } catch (err: unknown) {
-        if (!this.isResourceAlreadyExistsError(err)) {
-          throw err;
-        }
-      }
-    }
+    const reindexJobsCreated = await this.ensureIndex(
+      reindexJobsIndex,
+      REINDEX_JOBS_MAPPING_V1,
+    );
 
     // 4. Ensure search-categories index exists
     const searchCategoriesIndex = getSearchCategoriesIndex(prefix);
-    let searchCategoriesCreated = false;
-    const searchCategoriesExists = await this.client.indices.exists({
-      index: searchCategoriesIndex,
-    });
-    if (!searchCategoriesExists) {
-      try {
-        await this.client.indices.create({
-          index: searchCategoriesIndex,
-          mappings: SEARCH_CATEGORIES_MAPPING_V1,
-        });
-        searchCategoriesCreated = true;
-        this.logger.log(`Created internal index ${searchCategoriesIndex}`);
-      } catch (err: unknown) {
-        if (!this.isResourceAlreadyExistsError(err)) {
-          throw err;
-        }
-      }
-    }
+    const searchCategoriesCreated = await this.ensureIndex(
+      searchCategoriesIndex,
+      SEARCH_CATEGORIES_MAPPING_V1,
+    );
 
     return {
       alias,
