@@ -57,7 +57,9 @@ describe('Reindex DTOs Validation (Unit)', () => {
 
         const errors = await validate(dto);
         expect(errors.length).toBeGreaterThan(0);
-        const mappingError = errors.find((e) => e.property === 'mapping_version');
+        const mappingError = errors.find(
+          (e) => e.property === 'mapping_version',
+        );
         expect(mappingError).toBeDefined();
       }
     });

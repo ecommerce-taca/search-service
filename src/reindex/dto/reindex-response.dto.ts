@@ -27,6 +27,7 @@ export interface ReindexJobDetailsResponseData {
   total_estimate: number | null;
   checkpoint: string | null;
   started_at: string;
+  finished_at?: string | null;
   updated_at: string;
   error_code: string | null;
 }

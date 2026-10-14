@@ -17,15 +17,17 @@ describe('ReindexRunner (Unit)', () => {
   let jobRepo: jest.Mocked<ReindexJobRepository>;
   let configService: jest.Mocked<AppConfigService>;
   let kafka: jest.Mocked<Kafka>;
-  let documentBuilder: any;
-  let indexWriter: any;
+  let documentBuilder: Record<string, jest.Mock>;
+  let indexWriter: Record<string, jest.Mock>;
 
   const mockPrefix = 'test-reindex-';
   const activeIndex = `${mockPrefix}products-v1-20261014100000`;
   const targetIndex = `${mockPrefix}products-v1-20261014120000`;
   const aliasName = `${mockPrefix}products-read`;
 
-  const createBaseJob = (source: 'INDEX_COPY' | 'KAFKA_REPLAY' = 'INDEX_COPY'): ReindexJobDocument => ({
+  const createBaseJob = (
+    source: 'INDEX_COPY' | 'KAFKA_REPLAY' = 'INDEX_COPY',
+  ): ReindexJobDocument => ({
     job_id: 'job-01912fb8-7a1b-7c12-9c55-8b1c34a6d001',
     target_index: targetIndex,
     mapping_version: 1,
@@ -125,9 +127,11 @@ describe('ReindexRunner (Unit)', () => {
       }),
       admin: jest.fn().mockReturnValue({
         connect: jest.fn().mockResolvedValue(undefined),
-        fetchTopicOffsets: jest.fn().mockResolvedValue([
-          { partition: 0, offset: '100', high: '100', low: '0' },
-        ]),
+        fetchTopicOffsets: jest
+          .fn()
+          .mockResolvedValue([
+            { partition: 0, offset: '100', high: '100', low: '0' },
+          ]),
         disconnect: jest.fn().mockResolvedValue(undefined),
       }),
     } as unknown as jest.Mocked<Kafka>;
@@ -160,11 +164,15 @@ describe('ReindexRunner (Unit)', () => {
   describe('Validation Gate 1: Count Comparison (RX-U-38, RX-U-39, RX-U-40)', () => {
     it('[RX-U-38] Pre-swap Gate 1: Count difference within threshold (diff <= 0.1%) returns PASS', async () => {
       // old = 10,000; new = 10,005 -> diff = 0.05% <= 0.1%
-      esClient.count.mockImplementation(async ({ index }) => {
-        if (index === activeIndex) return { count: 10000 };
-        if (index === targetIndex) return { count: 10005 };
-        return { count: 0 };
-      });
+      esClient.count.mockImplementation((async ({
+        index,
+      }: {
+        index: string;
+      }) => {
+        if (index === activeIndex) return { count: 10000, _shards: {} };
+        if (index === targetIndex) return { count: 10005, _shards: {} };
+        return { count: 0, _shards: {} };
+      }) as never);
 
       const gateResult = await runner.checkDocumentCountGate(
         activeIndex,
@@ -176,11 +184,15 @@ describe('ReindexRunner (Unit)', () => {
 
     it('[RX-U-39] Pre-swap Gate 1: Count difference exceeds threshold (missing docs > 0.1%) returns FAIL REINDEX_GATE_COUNT_MISMATCH', async () => {
       // old = 10,000; new = 9,980 -> missing 20 docs = 0.2% > 0.1%
-      esClient.count.mockImplementation(async ({ index }) => {
-        if (index === activeIndex) return { count: 10000 };
-        if (index === targetIndex) return { count: 9980 };
-        return { count: 0 };
-      });
+      esClient.count.mockImplementation((async ({
+        index,
+      }: {
+        index: string;
+      }) => {
+        if (index === activeIndex) return { count: 10000, _shards: {} };
+        if (index === targetIndex) return { count: 9980, _shards: {} };
+        return { count: 0, _shards: {} };
+      }) as never);
 
       const gateResult = await runner.checkDocumentCountGate(
         activeIndex,
@@ -193,11 +205,16 @@ describe('ReindexRunner (Unit)', () => {
     });
 
     it('[RX-U-40] Pre-swap Gate 1: Target index count = 0 when old index > 0 returns FAIL REINDEX_GATE_COUNT_MISMATCH', async () => {
-      esClient.count.mockImplementation(async ({ index }) => {
-        if (index === activeIndex) return { count: 48213 };
-        if (index === targetIndex) return { count: 0 };
-        return { count: 0 };
-      });
+      // old = 48,213; target = 0 -> diff > 0.1%
+      esClient.count.mockImplementation((async ({
+        index,
+      }: {
+        index: string;
+      }) => {
+        if (index === activeIndex) return { count: 48213, _shards: {} };
+        if (index === targetIndex) return { count: 0, _shards: {} };
+        return { count: 0, _shards: {} };
+      }) as never);
 
       const gateResult = await runner.checkDocumentCountGate(
         activeIndex,
@@ -212,29 +229,45 @@ describe('ReindexRunner (Unit)', () => {
 
   describe('Validation Gate 2: Source Version Check (RX-U-41, RX-U-42)', () => {
     it('[RX-U-41] Pre-swap Gate 2: Source version check (target >= active) returns PASS', async () => {
-      esClient.search.mockImplementation(async ({ index }) => {
+      esClient.search.mockImplementation((async ({
+        index,
+      }: {
+        index: string;
+      }) => {
         if (index === activeIndex) {
           return {
             hits: {
               hits: [
-                { _id: 'p-1', _source: { product_id: 'p-1', source_version: 5 } },
-                { _id: 'p-2', _source: { product_id: 'p-2', source_version: 10 } },
+                {
+                  _id: 'p-1',
+                  _source: { product_id: 'p-1', source_version: 5 },
+                },
+                {
+                  _id: 'p-2',
+                  _source: { product_id: 'p-2', source_version: 10 },
+                },
               ],
             },
-          } as any;
+          } as never;
         }
         if (index === targetIndex) {
           return {
             hits: {
               hits: [
-                { _id: 'p-1', _source: { product_id: 'p-1', source_version: 5 } },
-                { _id: 'p-2', _source: { product_id: 'p-2', source_version: 11 } },
+                {
+                  _id: 'p-1',
+                  _source: { product_id: 'p-1', source_version: 5 },
+                },
+                {
+                  _id: 'p-2',
+                  _source: { product_id: 'p-2', source_version: 11 },
+                },
               ],
             },
-          } as any;
+          } as never;
         }
-        return { hits: { hits: [] } } as any;
-      });
+        return { hits: { hits: [] } } as never;
+      }) as never);
 
       const gateResult = await runner.checkSourceVersionGate(
         activeIndex,
@@ -244,27 +277,37 @@ describe('ReindexRunner (Unit)', () => {
     });
 
     it('[RX-U-42] Pre-swap Gate 2: Source version regression detected returns FAIL REINDEX_GATE_VERSION_REGRESSION', async () => {
-      esClient.search.mockImplementation(async ({ index }) => {
+      esClient.search.mockImplementation((async ({
+        index,
+      }: {
+        index: string;
+      }) => {
         if (index === activeIndex) {
           return {
             hits: {
               hits: [
-                { _id: 'p-1', _source: { product_id: 'p-1', source_version: 8 } },
+                {
+                  _id: 'p-1',
+                  _source: { product_id: 'p-1', source_version: 8 },
+                },
               ],
             },
-          } as any;
+          } as never;
         }
         if (index === targetIndex) {
           return {
             hits: {
               hits: [
-                { _id: 'p-1', _source: { product_id: 'p-1', source_version: 7 } },
+                {
+                  _id: 'p-1',
+                  _source: { product_id: 'p-1', source_version: 7 },
+                },
               ],
             },
-          } as any;
+          } as never;
         }
-        return { hits: { hits: [] } } as any;
-      });
+        return { hits: { hits: [] } } as never;
+      }) as never);
 
       const gateResult = await runner.checkSourceVersionGate(
         activeIndex,
@@ -293,7 +336,7 @@ describe('ReindexRunner (Unit)', () => {
         suggest: {
           suggest: [{ options: [{ text: 'suggest item' }] }],
         },
-      } as any);
+      } as never);
 
       const gateResult = await runner.checkSmokeQueriesGate(targetIndex);
       expect(gateResult.passed).toBe(true);
@@ -311,7 +354,7 @@ describe('ReindexRunner (Unit)', () => {
           brand: { buckets: [] },
           attribute_pairs: { buckets: [] },
         },
-      } as any);
+      } as never);
 
       const gateResult = await runner.checkSmokeQueriesGate(targetIndex);
       expect(gateResult.passed).toBe(false);
@@ -333,7 +376,7 @@ describe('ReindexRunner (Unit)', () => {
           ],
         },
         aggregations: {},
-      } as any);
+      } as never);
 
       const gateResult = await runner.checkSmokeQueriesGate(targetIndex);
       expect(gateResult.passed).toBe(false);
@@ -347,13 +390,13 @@ describe('ReindexRunner (Unit)', () => {
     it('executes ES _reindex, polls tasks.get until complete, and transitions to VALIDATING', async () => {
       const job = createBaseJob('INDEX_COPY');
 
-      esClient.reindex.mockResolvedValueOnce({ task: 'task-123' } as any);
-      esClient.tasks.get
-        .mockResolvedValueOnce({ completed: false } as any)
+      esClient.reindex.mockResolvedValueOnce({ task: 'task-123' } as never);
+      (esClient.tasks.get as jest.Mock)
+        .mockResolvedValueOnce({ completed: false } as never)
         .mockResolvedValueOnce({
           completed: true,
           response: { total: 10000, created: 10000, updated: 0, failures: [] },
-        } as any);
+        } as never);
 
       await runner.executeCopyStep(job);
 
@@ -392,18 +435,20 @@ describe('ReindexRunner (Unit)', () => {
 
   describe('KAFKA_REPLAY Execution Flow & Missing Provider Failures', () => {
     it('fails with REINDEX_SOURCE_UNAVAILABLE when PRODUCT_DOCUMENT_BUILDER or INDEX_WRITER are absent', async () => {
-      const moduleWithoutIndexing: TestingModule = await Test.createTestingModule({
-        providers: [
-          ReindexRunner,
-          { provide: Client, useValue: esClient },
-          { provide: ReindexJobRepository, useValue: jobRepo },
-          { provide: AppConfigService, useValue: configService },
-          { provide: Kafka, useValue: kafka },
-          // PRODUCT_DOCUMENT_BUILDER & INDEX_WRITER omitted
-        ],
-      }).compile();
+      const moduleWithoutIndexing: TestingModule =
+        await Test.createTestingModule({
+          providers: [
+            ReindexRunner,
+            { provide: Client, useValue: esClient },
+            { provide: ReindexJobRepository, useValue: jobRepo },
+            { provide: AppConfigService, useValue: configService },
+            { provide: Kafka, useValue: kafka },
+            // PRODUCT_DOCUMENT_BUILDER & INDEX_WRITER omitted
+          ],
+        }).compile();
 
-      const runnerNoIndexing = moduleWithoutIndexing.get<ReindexRunner>(ReindexRunner);
+      const runnerNoIndexing =
+        moduleWithoutIndexing.get<ReindexRunner>(ReindexRunner);
       const job = createBaseJob('KAFKA_REPLAY');
 
       await runnerNoIndexing.run(job);
@@ -476,6 +521,55 @@ describe('ReindexRunner (Unit)', () => {
       );
 
       expect(jobRepo.releaseLock).toHaveBeenCalledWith(job.job_id);
+    });
+
+    it('[Techlead Review Item 2] does not define dead code resumeBackfill', () => {
+      const r = runner as unknown as Record<string, unknown>;
+      expect(r.resumeBackfill).toBeUndefined();
+    });
+
+    it('[Techlead Review Item 5] copyStep handles estypes.TasksGetResponse with completed and status info', async () => {
+      const job = createBaseJob('INDEX_COPY');
+      esClient.reindex.mockResolvedValueOnce({ task: 'task-456' } as never);
+      (esClient.tasks.get as jest.Mock).mockResolvedValueOnce({
+        completed: true,
+        task: {
+          id: 456,
+          type: 'direct',
+          action: 'indices:data/write/reindex',
+          status: {
+            total: 50,
+            created: 45,
+            updated: 5,
+            version_conflicts: 0,
+          },
+          description: 'reindex',
+          start_time_in_millis: Date.now(),
+          running_time_in_nanos: 0,
+          cancellable: true,
+          headers: {},
+        },
+        response: {
+          took: 100,
+          timed_out: false,
+          total: 50,
+          updated: 5,
+          created: 45,
+          deleted: 0,
+          batches: 1,
+          version_conflicts: 0,
+          noops: 0,
+          retries: { bulk: 0, search: 0 },
+          throttled_millis: 0,
+          requests_per_second: -1,
+          throttled_until_millis: 0,
+          failures: [],
+        },
+      });
+
+      await runner.executeCopyStep(job);
+      expect(job.processed_count).toBe(50);
+      expect(job.failed_count).toBe(0);
     });
   });
 });

@@ -32,11 +32,20 @@ import {
   ReindexErrorCode,
   ReindexSource,
 } from './enums';
-import { ReindexJobDocument, ReindexJobRepository } from './job.repository';
+import {
+  ReindexJobDocument,
+  ReindexJobRecord,
+  ReindexJobRepository,
+} from './job.repository';
 import { ReindexRunner } from './reindex.runner';
 import { assertTransition } from './state-machine';
 
-const VALID_JOB_ID_REGEX = /^job-[a-zA-Z0-9_-]+$/;
+export { ReindexErrorCode };
+export const REINDEX_ERROR_CODES = ReindexErrorCode;
+export const REINDEX_STALE_AFTER_MS = 15 * 60 * 1000;
+
+const VALID_JOB_ID_REGEX =
+  /^job-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 @Injectable()
 export class ReindexService {
@@ -77,13 +86,38 @@ export class ReindexService {
   generateTargetIndexName(
     mappingVersion: number = MAPPING_VERSION,
     dateOrTimestamp?: Date | string,
-    prefix = this.configService.esIndexPrefix,
+    prefix = '',
   ): string {
     return ReindexService.generateTargetIndexName(
       mappingVersion,
       dateOrTimestamp,
       prefix,
     );
+  }
+
+  formatErrorCode(
+    state: ReindexState,
+    errorCode: string | null,
+  ): string | null {
+    if (state !== ReindexState.FAILED) {
+      return null;
+    }
+    return errorCode;
+  }
+
+  mapExceptionToErrorCode(error: unknown): ReindexErrorCode {
+    if (
+      error &&
+      typeof error === 'object' &&
+      'errorCode' in error &&
+      typeof (error as { errorCode: string }).errorCode === 'string' &&
+      Object.values(ReindexErrorCode).includes(
+        (error as { errorCode: ReindexErrorCode }).errorCode,
+      )
+    ) {
+      return (error as { errorCode: ReindexErrorCode }).errorCode;
+    }
+    return ReindexErrorCode.REINDEX_WORKER_ERROR;
   }
 
   serializeJob(job: ReindexJobDocument): ReindexJobDetailsResponseData {
@@ -96,7 +130,7 @@ export class ReindexService {
       }
     }
 
-    return {
+    const details: ReindexJobDetailsResponseData = {
       job_id: job.job_id,
       state: job.state,
       target_index: job.target_index,
@@ -109,6 +143,39 @@ export class ReindexService {
       updated_at: job.updated_at,
       error_code: errorCode,
     };
+    if (job.finished_at) {
+      details.finished_at = job.finished_at;
+    }
+    return details;
+  }
+
+  private async expireIfStale(
+    record: ReindexJobRecord,
+  ): Promise<ReindexJobDocument> {
+    const job = record.doc ?? record;
+    if (
+      job.state === ReindexState.RUNNING ||
+      job.state === ReindexState.VALIDATING
+    ) {
+      const updatedTime = new Date(job.updated_at).getTime();
+      if (Date.now() - updatedTime > REINDEX_STALE_AFTER_MS) {
+        job.state = ReindexState.FAILED;
+        job.error_code = ReindexErrorCode.REINDEX_TIMEOUT;
+        const now = new Date().toISOString();
+        job.finished_at = now;
+        job.updated_at = now;
+        if (
+          record._seq_no !== undefined &&
+          record._primary_term !== undefined
+        ) {
+          await this.jobRepo.update(job, record._seq_no, record._primary_term);
+        } else {
+          await this.jobRepo.update(job);
+        }
+        await this.jobRepo.releaseLock(job.job_id);
+      }
+    }
+    return job;
   }
 
   async start(dto: ReindexRequestDto): Promise<ReindexStartResponseData> {
@@ -119,9 +186,8 @@ export class ReindexService {
       );
     }
 
-    // Check active job across system
-    const activeJob = await this.jobRepo.findActiveJob();
-    if (activeJob) {
+    const hasActive = await this.jobRepo.hasActiveJob();
+    if (hasActive) {
       throw new SearchException(SearchErrorCode.SEARCH_REINDEX_CONFLICT);
     }
 
@@ -130,16 +196,22 @@ export class ReindexService {
 
     const prefix = this.configService.esIndexPrefix;
     const alias = getProductsAlias(prefix);
-    let activeIndex: string | null = null;
     let totalEstimate: number | null = null;
 
     try {
-      const aliasMap = await this.client.indices.getAlias({ name: alias });
-      const indices = Object.keys(aliasMap).sort();
-      if (indices.length > 0) {
-        activeIndex = indices[0];
-        const countRes = await this.client.count({ index: alias });
-        totalEstimate = countRes.count;
+      let aliasExists = true;
+      if (typeof this.client.indices?.existsAlias === 'function') {
+        aliasExists = Boolean(
+          await this.client.indices.existsAlias({ name: alias }),
+        );
+      }
+      if (aliasExists) {
+        const aliasMap = await this.client.indices.getAlias({ name: alias });
+        const indices = Object.keys(aliasMap).sort();
+        if (indices.length > 0) {
+          const countRes = await this.client.count({ index: alias });
+          totalEstimate = countRes.count;
+        }
       }
     } catch {
       // Alias does not exist yet
@@ -170,6 +242,8 @@ export class ReindexService {
       job_id: jobId,
       target_index: targetIndex,
       mapping_version: dto.mapping_version,
+      source: dto.source || ReindexSource.INDEX_COPY,
+      reason: dto.reason,
       state: ReindexState.REQUESTED,
       checkpoint: null,
       total_estimate: totalEstimate,
@@ -189,12 +263,9 @@ export class ReindexService {
     this.abortControllers.set(jobId, abortController);
 
     // Launch runner asynchronously without blocking the response
-    const source = dto.source || ReindexSource.INDEX_COPY;
-    void this.runner
-      .executeJob(jobDoc, source, activeIndex, abortController.signal)
-      .finally(() => {
-        this.abortControllers.delete(jobId);
-      });
+    void this.runner.run(jobDoc).finally(() => {
+      this.abortControllers.delete(jobId);
+    });
 
     return {
       job_id: jobId,
@@ -208,41 +279,72 @@ export class ReindexService {
       throw new SearchException(SearchErrorCode.SEARCH_REINDEX_NOT_FOUND);
     }
 
-    const record = await this.jobRepo.get(jobId);
-    const job = record.doc;
+    const maxRetries = 5;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      const record = await this.jobRepo.get(jobId);
+      if (!record) {
+        throw new SearchException(SearchErrorCode.SEARCH_REINDEX_NOT_FOUND);
+      }
+      const job = record.doc ?? record;
 
-    if (
-      job.state !== ReindexState.REQUESTED &&
-      job.state !== ReindexState.RUNNING &&
-      job.state !== ReindexState.VALIDATING
-    ) {
-      throw new SearchException(SearchErrorCode.SEARCH_REINDEX_CONFLICT);
+      if (job.state === ReindexState.CANCELLED) {
+        return this.serializeJob(job);
+      }
+
+      if (
+        job.state !== ReindexState.REQUESTED &&
+        job.state !== ReindexState.RUNNING &&
+        job.state !== ReindexState.VALIDATING
+      ) {
+        throw new SearchException(SearchErrorCode.SEARCH_REINDEX_CONFLICT);
+      }
+
+      const controller = this.abortControllers.get(jobId);
+      if (controller) {
+        controller.abort();
+        this.abortControllers.delete(jobId);
+      }
+      this.runner.abort(jobId);
+
+      try {
+        await this.client.indices.delete({ index: job.target_index });
+      } catch (err: unknown) {
+        this.logger.debug(
+          `Target index ${job.target_index} not deleted during cancel: ${err}`,
+        );
+      }
+
+      assertTransition(job.state, ReindexState.CANCELLED);
+      job.state = ReindexState.CANCELLED;
+      job.finished_at = new Date().toISOString();
+      job.updated_at = new Date().toISOString();
+      job.error_code = null;
+
+      try {
+        if (
+          record._seq_no !== undefined &&
+          record._primary_term !== undefined
+        ) {
+          await this.jobRepo.update(job, record._seq_no, record._primary_term);
+        } else {
+          await this.jobRepo.update(job);
+        }
+        await this.jobRepo.releaseLock(jobId);
+
+        return this.serializeJob(job);
+      } catch (err: unknown) {
+        if (
+          err instanceof SearchException &&
+          err.code === SearchErrorCode.SEARCH_REINDEX_CONFLICT &&
+          attempt < maxRetries - 1
+        ) {
+          continue;
+        }
+        throw err;
+      }
     }
 
-    const controller = this.abortControllers.get(jobId);
-    if (controller) {
-      controller.abort();
-      this.abortControllers.delete(jobId);
-    }
-
-    try {
-      await this.client.indices.delete({ index: job.target_index });
-    } catch (err: unknown) {
-      this.logger.debug(
-        `Target index ${job.target_index} not deleted during cancel: ${err}`,
-      );
-    }
-
-    assertTransition(job.state, ReindexState.CANCELLED);
-    job.state = ReindexState.CANCELLED;
-    job.finished_at = new Date().toISOString();
-    job.updated_at = new Date().toISOString();
-    job.error_code = null;
-
-    await this.jobRepo.update(job, record._seq_no, record._primary_term);
-    await this.jobRepo.releaseLock(jobId);
-
-    return this.serializeJob(job);
+    throw new SearchException(SearchErrorCode.SEARCH_REINDEX_CONFLICT);
   }
 
   async getJob(jobId: string): Promise<ReindexJobDetailsResponseData> {
@@ -251,31 +353,18 @@ export class ReindexService {
     }
 
     const record = await this.jobRepo.get(jobId);
-    const job = record.doc;
-
-    if (job.state === ReindexState.RUNNING) {
-      const updatedTime = new Date(job.updated_at).getTime();
-      if (Date.now() - updatedTime > 15 * 60 * 1000) {
-        job.state = ReindexState.FAILED;
-        job.error_code = ReindexErrorCode.REINDEX_TIMEOUT;
-        job.finished_at = new Date().toISOString();
-        job.updated_at = new Date().toISOString();
-        await this.jobRepo.update(job, record._seq_no, record._primary_term);
-        await this.jobRepo.releaseLock(job.job_id);
-      }
+    if (!record) {
+      throw new SearchException(SearchErrorCode.SEARCH_REINDEX_NOT_FOUND);
     }
 
+    const job = await this.expireIfStale(record);
     return this.serializeJob(job);
   }
 
   async getStatus(
     query?: AdminSearchStatusQueryDto,
   ): Promise<AdminSearchStatusResponseData> {
-    if (query?.index || query?.consumer_group) {
-      this.logger.debug(
-        `Status check requested with optional filter: index=${query.index}, group=${query.consumer_group}`,
-      );
-    }
+    void query;
     const prefix = this.configService.esIndexPrefix;
     const alias = getProductsAlias(prefix);
 
@@ -313,22 +402,7 @@ export class ReindexService {
     const latestRecord = await this.jobRepo.latest();
 
     if (latestRecord) {
-      const latestJob = latestRecord.doc;
-      if (latestJob.state === ReindexState.RUNNING) {
-        const updatedTime = new Date(latestJob.updated_at).getTime();
-        if (Date.now() - updatedTime > 15 * 60 * 1000) {
-          latestJob.state = ReindexState.FAILED;
-          latestJob.error_code = ReindexErrorCode.REINDEX_TIMEOUT;
-          latestJob.finished_at = new Date().toISOString();
-          latestJob.updated_at = new Date().toISOString();
-          await this.jobRepo.update(
-            latestJob,
-            latestRecord._seq_no,
-            latestRecord._primary_term,
-          );
-          await this.jobRepo.releaseLock(latestJob.job_id);
-        }
-      }
+      const latestJob = await this.expireIfStale(latestRecord);
       reindexState = latestJob.state;
     }
 
@@ -342,39 +416,5 @@ export class ReindexService {
       dlq_count: dlqCount,
       reindex_state: reindexState,
     };
-  }
-
-  async executeAliasSwap(
-    oldIndex: string | null,
-    newIndex: string,
-    alias: string,
-  ): Promise<void> {
-    const actions: Array<{
-      remove?: { index: string; alias: string };
-      add?: { index: string; alias: string };
-    }> = [];
-
-    if (oldIndex) {
-      actions.push({ remove: { index: oldIndex, alias } });
-    }
-    actions.push({ add: { index: newIndex, alias } });
-
-    await this.client.indices.updateAliases({ actions });
-  }
-
-  async rollbackAliasSwap(
-    currentActiveIndex: string,
-    previousIndex: string,
-    alias: string,
-  ): Promise<void> {
-    const actions = [
-      { remove: { index: currentActiveIndex, alias } },
-      { add: { index: previousIndex, alias } },
-    ];
-    await this.client.indices.updateAliases({ actions });
-  }
-
-  async resumeBackfill(job: ReindexJobDocument): Promise<void> {
-    return this.runner.resumeBackfill(job);
   }
 }

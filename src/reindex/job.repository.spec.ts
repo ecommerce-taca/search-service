@@ -52,7 +52,7 @@ describe('ReindexJobRepository (Unit)', () => {
       esClient.index.mockResolvedValueOnce({
         _id: 'active-lock',
         result: 'created',
-      } as any);
+      } as never);
 
       await repository.acquireLock(testJobId);
 
@@ -73,7 +73,9 @@ describe('ReindexJobRepository (Unit)', () => {
     });
 
     it('acquireLock throws SEARCH_REINDEX_CONFLICT (409) when lock document already exists', async () => {
-      const conflictError: any = new Error('version_conflict_engine_exception');
+      const conflictError = new Error(
+        'version_conflict_engine_exception',
+      ) as Error & { statusCode: number };
       conflictError.statusCode = 409;
       esClient.index.mockRejectedValueOnce(conflictError);
 
@@ -83,9 +85,10 @@ describe('ReindexJobRepository (Unit)', () => {
 
       try {
         await repository.acquireLock(testJobId);
-      } catch (err: any) {
-        expect(err.code).toBe(SearchErrorCode.SEARCH_REINDEX_CONFLICT);
-        expect(err.getStatus()).toBe(409);
+      } catch (err: unknown) {
+        const e = err as SearchException;
+        expect(e.code).toBe(SearchErrorCode.SEARCH_REINDEX_CONFLICT);
+        expect(e.getStatus()).toBe(409);
       }
     });
 
@@ -97,8 +100,8 @@ describe('ReindexJobRepository (Unit)', () => {
           target_index: 'active-lock',
           state: 'RUNNING',
         },
-      } as any);
-      esClient.delete.mockResolvedValueOnce({ result: 'deleted' } as any);
+      } as never);
+      esClient.delete.mockResolvedValueOnce({ result: 'deleted' } as never);
 
       await repository.releaseLock(testJobId);
 
@@ -120,7 +123,7 @@ describe('ReindexJobRepository (Unit)', () => {
           target_index: 'active-lock',
           state: 'RUNNING',
         },
-      } as any);
+      } as never);
 
       await repository.releaseLock(testJobId);
 
@@ -128,7 +131,9 @@ describe('ReindexJobRepository (Unit)', () => {
     });
 
     it('releaseLock safely ignores if active-lock document does not exist', async () => {
-      const notFoundError: any = new Error('document_missing_exception');
+      const notFoundError = new Error('document_missing_exception') as Error & {
+        statusCode: number;
+      };
       notFoundError.statusCode = 404;
       esClient.get.mockRejectedValueOnce(notFoundError);
 
@@ -152,7 +157,7 @@ describe('ReindexJobRepository (Unit)', () => {
             },
           ],
         },
-      } as any);
+      } as never);
 
       const hasActive = await repository.hasActiveJob();
       expect(hasActive).toBe(true);
@@ -172,7 +177,7 @@ describe('ReindexJobRepository (Unit)', () => {
             },
           ],
         },
-      } as any);
+      } as never);
 
       const hasActive = await repository.hasActiveJob();
       expect(hasActive).toBe(true);
@@ -192,7 +197,7 @@ describe('ReindexJobRepository (Unit)', () => {
             },
           ],
         },
-      } as any);
+      } as never);
 
       const hasActive = await repository.hasActiveJob();
       expect(hasActive).toBe(true);
@@ -203,7 +208,7 @@ describe('ReindexJobRepository (Unit)', () => {
         hits: {
           hits: [],
         },
-      } as any);
+      } as never);
 
       const hasActive = await repository.hasActiveJob();
       expect(hasActive).toBe(false);
@@ -214,7 +219,7 @@ describe('ReindexJobRepository (Unit)', () => {
         hits: {
           hits: [],
         },
-      } as any);
+      } as never);
 
       const hasActive = await repository.hasActiveJob();
       expect(hasActive).toBe(false);
@@ -225,7 +230,7 @@ describe('ReindexJobRepository (Unit)', () => {
         hits: {
           hits: [],
         },
-      } as any);
+      } as never);
 
       const hasActive = await repository.hasActiveJob();
       expect(hasActive).toBe(false);
@@ -245,7 +250,7 @@ describe('ReindexJobRepository (Unit)', () => {
             },
           ],
         },
-      } as any);
+      } as never);
 
       await repository.latest();
 
@@ -291,15 +296,25 @@ describe('ReindexJobRepository (Unit)', () => {
         _id: jobDoc.job_id,
         _seq_no: 1,
         _primary_term: 1,
-      } as any);
+      } as never);
 
       await repository.create(jobDoc);
 
+      const expectedDoc = { ...jobDoc };
+      delete expectedDoc.source;
+      delete expectedDoc.reason;
       expect(esClient.index).toHaveBeenCalledWith({
         index: expectedJobsIndex,
         id: jobDoc.job_id,
-        document: jobDoc,
+        document: expectedDoc,
+        refresh: 'wait_for',
       });
+    });
+
+    it('[R1 Techlead Fix] does not expose ensureMapping and never modifies shared mapping at runtime', async () => {
+      const repo = repository as unknown as Record<string, unknown>;
+      expect(repo.ensureMapping).toBeUndefined();
+      expect(repo.mappingChecked).toBeUndefined();
     });
 
     it('[RX-U-36] Checkpoint persistence: batch indexing progress updates checkpoint and processed_count', async () => {
@@ -308,7 +323,7 @@ describe('ReindexJobRepository (Unit)', () => {
         result: 'updated',
         _seq_no: 2,
         _primary_term: 1,
-      } as any);
+      } as never);
 
       await repository.updateProgress('job-01912fb8-0001', {
         checkpoint: 'product-01912f9a',
@@ -334,13 +349,13 @@ describe('ReindexJobRepository (Unit)', () => {
         _id: 'job-01912fb8-0001',
         _seq_no: 3,
         _primary_term: 1,
-      } as any);
+      } as never);
 
       await repository.update(
         {
           job_id: 'job-01912fb8-0001',
           state: ReindexState.RUNNING,
-        } as any,
+        } as unknown as ReindexJobDocument,
         {
           ifSeqNo: 2,
           ifPrimaryTerm: 1,
@@ -366,7 +381,7 @@ describe('ReindexJobRepository (Unit)', () => {
         },
         _seq_no: 1,
         _primary_term: 1,
-      } as any);
+      } as never);
 
       const job = await repository.get('job-01912fb8-0001');
       expect(job).not.toBeNull();

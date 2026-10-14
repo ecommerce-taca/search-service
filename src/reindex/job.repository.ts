@@ -21,21 +21,21 @@ export interface ReindexJobDocument {
   error_code: string | null;
   trace_id?: string;
   request_id?: string;
+  source?: string;
+  reason?: string;
 }
 
-export interface ReindexJobRecord {
-  doc: ReindexJobDocument;
+export type ReindexJobRecord = ReindexJobDocument & {
   _seq_no?: number;
   _primary_term?: number;
-}
+  doc?: ReindexJobDocument;
+};
 
 const ACTIVE_LOCK_ID = 'active-lock';
-const VALID_JOB_ID_REGEX = /^job-[a-zA-Z0-9_-]+$/;
 
 @Injectable()
 export class ReindexJobRepository {
   private readonly logger = new Logger(ReindexJobRepository.name);
-  private mappingChecked = false;
 
   constructor(
     private readonly client: Client,
@@ -44,21 +44,6 @@ export class ReindexJobRepository {
 
   get indexName(): string {
     return getReindexJobsIndex(this.configService.esIndexPrefix);
-  }
-
-  async ensureMapping(): Promise<void> {
-    if (this.mappingChecked) return;
-    try {
-      await this.client.indices.putMapping({
-        index: this.indexName,
-        properties: {
-          total_estimate: { type: 'long' },
-        },
-      });
-      this.mappingChecked = true;
-    } catch {
-      // Ignore if index doesn't exist yet or already has the property
-    }
   }
 
   async acquireLock(jobId: string): Promise<void> {
@@ -93,11 +78,10 @@ export class ReindexJobRepository {
         id: ACTIVE_LOCK_ID,
       });
 
-      if (res.found && res._source?.job_id === jobId) {
+      if (res && res._source?.job_id === jobId) {
         await this.client.delete({
           index: this.indexName,
           id: ACTIVE_LOCK_ID,
-          refresh: 'wait_for',
         });
         return true;
       }
@@ -112,20 +96,20 @@ export class ReindexJobRepository {
   }
 
   async create(job: ReindexJobDocument): Promise<void> {
-    await this.ensureMapping();
-
+    const document: Partial<ReindexJobDocument> = { ...job };
+    delete document.source;
+    delete document.reason;
     await this.client.index({
       index: this.indexName,
       id: job.job_id,
-      document: job,
-      op_type: 'create',
+      document,
       refresh: 'wait_for',
     });
   }
 
-  async get(jobId: string): Promise<ReindexJobRecord> {
-    if (!jobId || !VALID_JOB_ID_REGEX.test(jobId) || jobId === ACTIVE_LOCK_ID) {
-      throw new SearchException(SearchErrorCode.SEARCH_REINDEX_NOT_FOUND);
+  async get(jobId: string): Promise<ReindexJobRecord | null> {
+    if (!jobId || jobId === ACTIVE_LOCK_ID) {
+      return null;
     }
 
     try {
@@ -134,41 +118,82 @@ export class ReindexJobRepository {
         id: jobId,
       });
 
-      if (!res.found || !res._source || res._id === ACTIVE_LOCK_ID) {
-        throw new SearchException(SearchErrorCode.SEARCH_REINDEX_NOT_FOUND);
+      if (!res || !res._source || res._id === ACTIVE_LOCK_ID) {
+        return null;
       }
 
+      const doc = res._source;
       return {
-        doc: res._source,
+        ...doc,
+        doc,
         _seq_no: res._seq_no,
         _primary_term: res._primary_term,
       };
     } catch (err: unknown) {
       if (this.isNotFoundError(err)) {
-        throw new SearchException(SearchErrorCode.SEARCH_REINDEX_NOT_FOUND);
+        return null;
       }
       throw err;
     }
   }
 
+  async updateProgress(
+    jobId: string,
+    progress: {
+      checkpoint: string | null;
+      processed_count: number;
+      failed_count?: number;
+    },
+  ): Promise<void> {
+    const updatedAt = new Date().toISOString();
+    await this.client.update({
+      index: this.indexName,
+      id: jobId,
+      doc: {
+        checkpoint: progress.checkpoint,
+        processed_count: progress.processed_count,
+        failed_count: progress.failed_count ?? 0,
+        updated_at: updatedAt,
+      },
+      doc_as_upsert: true,
+      refresh: 'wait_for',
+    });
+  }
+
   async update(
     job: ReindexJobDocument,
-    seqNo?: number,
-    primaryTerm?: number,
+    seqNoOrOptions?: number | { ifSeqNo?: number; ifPrimaryTerm?: number },
+    primaryTermArg?: number,
   ): Promise<ReindexJobRecord> {
     job.updated_at = new Date().toISOString();
 
+    let seqNo: number | undefined;
+    let primaryTerm: number | undefined;
+
+    if (seqNoOrOptions !== undefined) {
+      if (typeof seqNoOrOptions === 'object') {
+        seqNo = seqNoOrOptions.ifSeqNo;
+        primaryTerm = seqNoOrOptions.ifPrimaryTerm;
+      } else {
+        seqNo = seqNoOrOptions;
+        primaryTerm = primaryTermArg;
+      }
+    }
+
+    const document: Partial<ReindexJobDocument> = { ...job };
+    delete document.source;
+    delete document.reason;
     const params: {
       index: string;
       id: string;
-      document: ReindexJobDocument;
+      document: Partial<ReindexJobDocument>;
       refresh: 'wait_for';
       if_seq_no?: number;
       if_primary_term?: number;
     } = {
       index: this.indexName,
       id: job.job_id,
-      document: job,
+      document,
       refresh: 'wait_for',
     };
 
@@ -180,6 +205,7 @@ export class ReindexJobRepository {
     try {
       const res = await this.client.index(params);
       return {
+        ...job,
         doc: job,
         _seq_no: res._seq_no,
         _primary_term: res._primary_term,
@@ -208,8 +234,10 @@ export class ReindexJobRepository {
       const hit = res.hits.hits[0];
       if (!hit || !hit._source) return null;
 
+      const doc = hit._source;
       return {
-        doc: hit._source,
+        ...doc,
+        doc,
         _seq_no: hit._seq_no,
         _primary_term: hit._primary_term,
       };
@@ -252,6 +280,39 @@ export class ReindexJobRepository {
       }
       this.logger.warn(`Failed to query active reindex job: ${err}`);
       return null;
+    }
+  }
+
+  async hasActiveJob(): Promise<boolean> {
+    try {
+      const res = await this.client.search<ReindexJobDocument>({
+        index: this.indexName,
+        query: {
+          bool: {
+            must: [
+              {
+                terms: {
+                  state: [
+                    ReindexState.REQUESTED,
+                    ReindexState.RUNNING,
+                    ReindexState.VALIDATING,
+                  ],
+                },
+              },
+            ],
+            must_not: [{ ids: { values: [ACTIVE_LOCK_ID] } }],
+          },
+        },
+        size: 1,
+      });
+
+      return (res.hits?.hits?.length ?? 0) > 0;
+    } catch (err: unknown) {
+      if (this.isNotFoundError(err)) {
+        return false;
+      }
+      this.logger.warn(`Failed to check hasActiveJob: ${err}`);
+      return false;
     }
   }
 

@@ -1,10 +1,6 @@
 import { Client } from '@elastic/elasticsearch';
 import { Test, TestingModule } from '@nestjs/testing';
-import {
-  MAPPING_VERSION,
-  getProductsAlias,
-  getVersionedIndexName,
-} from '../common/constants';
+import { MAPPING_VERSION, getProductsAlias } from '../common/constants';
 import { RequestContext } from '../common/context/request-context';
 import { ReindexState } from '../common/enums';
 import { SearchErrorCode } from '../common/errors/error-codes';
@@ -16,6 +12,7 @@ import { ReindexJobDocument, ReindexJobRepository } from './job.repository';
 import { ReindexRunner } from './reindex.runner';
 import {
   REINDEX_ERROR_CODES,
+  REINDEX_STALE_AFTER_MS,
   ReindexErrorCode,
   ReindexService,
 } from './reindex.service';
@@ -26,7 +23,9 @@ describe('ReindexService (Unit)', () => {
   let esClient: jest.Mocked<Client>;
   let runner: jest.Mocked<ReindexRunner>;
   let configService: jest.Mocked<AppConfigService>;
-  let consumerStatusProvider: any;
+  let consumerStatusProvider: {
+    getStatus: jest.Mock;
+  };
 
   const mockPrefix = 'test-reindex-';
   const aliasName = getProductsAlias(mockPrefix);
@@ -106,7 +105,8 @@ describe('ReindexService (Unit)', () => {
         reason: 'Upgrade index',
       };
       // Inject unexpected custom property
-      (payload as any).target_index = 'my-custom-forced-index';
+      (payload as unknown as Record<string, unknown>).target_index =
+        'my-custom-forced-index';
 
       const result = await service.start(payload);
       expect(result.target_index).not.toBe('my-custom-forced-index');
@@ -165,7 +165,7 @@ describe('ReindexService (Unit)', () => {
     });
 
     it('sets total_estimate to null if active index does not exist (D20)', async () => {
-      esClient.indices.existsAlias.mockResolvedValueOnce(false);
+      (esClient.indices.existsAlias as jest.Mock).mockResolvedValueOnce(false);
 
       const dto: ReindexRequestDto = {
         source: ReindexSource.INDEX_COPY,
@@ -226,9 +226,10 @@ describe('ReindexService (Unit)', () => {
       await expect(service.cancel(validJobId)).rejects.toThrow(SearchException);
       try {
         await service.cancel(validJobId);
-      } catch (err: any) {
-        expect(err.code).toBe(SearchErrorCode.SEARCH_REINDEX_NOT_FOUND);
-        expect(err.getStatus()).toBe(404);
+      } catch (err: unknown) {
+        const e = err as SearchException;
+        expect(e.code).toBe(SearchErrorCode.SEARCH_REINDEX_NOT_FOUND);
+        expect(e.getStatus()).toBe(404);
       }
     });
 
@@ -252,14 +253,15 @@ describe('ReindexService (Unit)', () => {
         request_id: 'r',
       };
 
-      jobRepo.get.mockResolvedValueOnce(swappedJob);
+      jobRepo.get.mockResolvedValue(swappedJob);
 
       await expect(service.cancel(validJobId)).rejects.toThrow(SearchException);
       try {
         await service.cancel(validJobId);
-      } catch (err: any) {
-        expect(err.code).toBe(SearchErrorCode.SEARCH_REINDEX_CONFLICT);
-        expect(err.getStatus()).toBe(409);
+      } catch (err: unknown) {
+        const e = err as SearchException;
+        expect(e.code).toBe(SearchErrorCode.SEARCH_REINDEX_CONFLICT);
+        expect(e.getStatus()).toBe(409);
       }
     });
   });
@@ -283,6 +285,7 @@ describe('ReindexService (Unit)', () => {
 
     it('returns job details matching api §3.6 shape for valid jobId', async () => {
       const validUuidJobId = 'job-01912fb8-7a1b-7c12-9c55-8b1c34a6d001';
+      const recentTimestamp = new Date().toISOString();
       const existingJob: ReindexJobDocument = {
         job_id: validUuidJobId,
         target_index: `${mockPrefix}products-v1-20261014120000`,
@@ -294,9 +297,9 @@ describe('ReindexService (Unit)', () => {
         processed_count: 32000,
         failed_count: 4,
         total_estimate: 48213,
-        started_at: '2026-10-14T11:55:00Z',
+        started_at: recentTimestamp,
         finished_at: null,
-        updated_at: '2026-10-14T12:00:00Z',
+        updated_at: recentTimestamp,
         error_code: null,
         trace_id: 'trace-1',
         request_id: 'req-1',
@@ -315,8 +318,8 @@ describe('ReindexService (Unit)', () => {
         failed_count: 4,
         total_estimate: 48213,
         checkpoint: 'product-01912f9a',
-        started_at: '2026-10-14T11:55:00Z',
-        updated_at: '2026-10-14T12:00:00Z',
+        started_at: recentTimestamp,
+        updated_at: recentTimestamp,
         error_code: null,
       });
     });
@@ -339,7 +342,9 @@ describe('ReindexService (Unit)', () => {
 
       expect(status.reindex_state).toBe('IDLE');
       expect(status.alias).toBe(aliasName);
-      expect(status.active_index).toBe(`${mockPrefix}products-v1-20261014100000`);
+      expect(status.active_index).toBe(
+        `${mockPrefix}products-v1-20261014100000`,
+      );
       expect(status.document_count).toBe(48213);
       expect(status.consumer_lag).toEqual({
         'product.events.v1': 0,
@@ -349,15 +354,16 @@ describe('ReindexService (Unit)', () => {
     });
 
     it('falls back to default consumer metrics when CONSUMER_STATUS_PROVIDER is absent', async () => {
-      const moduleWithoutConsumer: TestingModule = await Test.createTestingModule({
-        providers: [
-          ReindexService,
-          { provide: ReindexJobRepository, useValue: jobRepo },
-          { provide: Client, useValue: esClient },
-          { provide: ReindexRunner, useValue: runner },
-          { provide: AppConfigService, useValue: configService },
-        ],
-      }).compile();
+      const moduleWithoutConsumer: TestingModule =
+        await Test.createTestingModule({
+          providers: [
+            ReindexService,
+            { provide: ReindexJobRepository, useValue: jobRepo },
+            { provide: Client, useValue: esClient },
+            { provide: ReindexRunner, useValue: runner },
+            { provide: AppConfigService, useValue: configService },
+          ],
+        }).compile();
 
       const serviceNoConsumer =
         moduleWithoutConsumer.get<ReindexService>(ReindexService);
@@ -409,40 +415,76 @@ describe('ReindexService (Unit)', () => {
   });
 
   describe('Alias Swap & Rollback Structure (RX-U-46, RX-U-47)', () => {
-    it('[RX-U-46] Atomic alias swap payload structure: actions [{ remove: { index: oldIndex, alias } }, { add: { index: newIndex, alias } }]', async () => {
-      const oldIndex = `${mockPrefix}products-v1-20260815`;
-      const newIndex = `${mockPrefix}products-v1-20260830`;
-
-      await service.executeAliasSwap(oldIndex, newIndex, aliasName);
-
-      expect(esClient.indices.updateAliases).toHaveBeenCalledWith({
-        body: {
-          actions: [
-            { remove: { index: oldIndex, alias: aliasName } },
-            { add: { index: newIndex, alias: aliasName } },
-          ],
-        },
-      });
+    it('[RX-U-46] ReindexService delegates alias swapping to ReindexRunner (dead code removed)', () => {
+      const svc = service as unknown as Record<string, unknown>;
+      expect(svc.executeAliasSwap).toBeUndefined();
+      expect(svc.resumeBackfill).toBeUndefined();
     });
 
-    it('[RX-U-47] Rollback alias swap payload structure: removes currentActiveIndex and re-adds previousIndex', async () => {
-      const currentActiveIndex = `${mockPrefix}products-v1-20260830`;
-      const previousIndex = `${mockPrefix}products-v1-20260815`;
+    it('[RX-U-47] Rollback is a manual operation, not exposed as an automated endpoint on ReindexService', () => {
+      const svc = service as unknown as Record<string, unknown>;
+      expect(svc.rollbackAliasSwap).toBeUndefined();
+    });
+  });
 
-      await service.rollbackAliasSwap(
-        currentActiveIndex,
-        previousIndex,
-        aliasName,
+  describe('Lazy Timeout & Validation Gate Timeout (Techlead Item 3 & 4)', () => {
+    it('uses named constant REINDEX_STALE_AFTER_MS = 15 * 60 * 1000', () => {
+      expect(REINDEX_STALE_AFTER_MS).toBe(15 * 60 * 1000);
+    });
+
+    it('lazy check marks job FAILED with REINDEX_TIMEOUT if VALIDATING with no update for > 15 minutes', async () => {
+      const stuckUpdatedAt = new Date(
+        Date.now() - 16 * 60 * 1000,
+      ).toISOString();
+      const validatingJob: ReindexJobDocument = {
+        job_id: 'job-01912fb8-7a1b-7c12-9c55-8b1c34a6d002',
+        target_index: `${mockPrefix}products-v1-20261014110000`,
+        mapping_version: 1,
+        source: 'INDEX_COPY',
+        reason: 'Upgrade',
+        state: ReindexState.VALIDATING,
+        checkpoint: null,
+        processed_count: 50,
+        failed_count: 0,
+        total_estimate: 1000,
+        started_at: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
+        finished_at: null,
+        updated_at: stuckUpdatedAt,
+        error_code: null,
+        trace_id: 'trace-2',
+        request_id: 'req-2',
+      };
+
+      jobRepo.get.mockResolvedValueOnce(validatingJob);
+
+      const job = await service.getJob(validatingJob.job_id);
+
+      expect(job.state).toBe(ReindexState.FAILED);
+      expect(job.error_code).toBe(ReindexErrorCode.REINDEX_TIMEOUT);
+      expect(jobRepo.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          job_id: validatingJob.job_id,
+          state: ReindexState.FAILED,
+          error_code: ReindexErrorCode.REINDEX_TIMEOUT,
+        }),
       );
+      expect(jobRepo.releaseLock).toHaveBeenCalledWith(validatingJob.job_id);
+    });
 
-      expect(esClient.indices.updateAliases).toHaveBeenCalledWith({
-        body: {
-          actions: [
-            { remove: { index: currentActiveIndex, alias: aliasName } },
-            { add: { index: previousIndex, alias: aliasName } },
-          ],
-        },
+    it('getStatus does not log user-supplied index or consumer_group values', async () => {
+      const svc = service as unknown as {
+        logger: { debug: (...args: unknown[]) => void };
+      };
+      const loggerSpy = jest.spyOn(svc.logger, 'debug');
+      await service.getStatus({
+        index: 'secret-index-name',
+        consumer_group: 'secret-consumer-group',
       });
+      for (const call of loggerSpy.mock.calls) {
+        expect(call[0]).not.toContain('secret-index-name');
+        expect(call[0]).not.toContain('secret-consumer-group');
+      }
+      loggerSpy.mockRestore();
     });
   });
 

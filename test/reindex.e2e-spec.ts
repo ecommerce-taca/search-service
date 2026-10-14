@@ -3,16 +3,9 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
-import {
-  BASE_INDEXES,
-  MAPPING_VERSION,
-  getProductsAlias,
-  getReindexJobsIndex,
-} from '../src/common/constants';
-import { ReindexState } from '../common/enums';
+import { ReindexState } from '../src/common/enums';
 import { SearchErrorCode } from '../src/common/errors/error-codes';
 import { SearchExceptionFilter } from '../src/common/errors/search-exception.filter';
-import { AppConfigService } from '../src/config/config.service';
 import { CONSUMER_STATUS_PROVIDER } from '../src/event-consumer/interfaces';
 import { ELASTICSEARCH_CLIENT } from '../src/product-index/elasticsearch.module';
 import { IndexBootstrapService } from '../src/product-index/index-bootstrap.service';
@@ -21,7 +14,27 @@ import { ReindexErrorCode } from '../src/reindex/reindex.service';
 
 describe('Reindex & Admin (e2e)', () => {
   let app: INestApplication;
-  let mockEsClient: any;
+  let mockEsClient: {
+    indices: {
+      existsAlias: jest.Mock;
+      getAlias: jest.Mock;
+      create: jest.Mock;
+      delete: jest.Mock;
+      updateAliases: jest.Mock;
+      refresh: jest.Mock;
+      exists: jest.Mock;
+    };
+    count: jest.Mock;
+    index: jest.Mock;
+    get: jest.Mock;
+    delete: jest.Mock;
+    search: jest.Mock;
+    reindex: jest.Mock;
+    close: jest.Mock;
+    tasks: {
+      get: jest.Mock;
+    };
+  };
   let inMemoryJobStore: Map<string, ReindexJobDocument>;
   let activeLockHeldBy: string | null = null;
 
@@ -49,7 +62,7 @@ describe('Reindex & Admin (e2e)', () => {
     mockEsClient = {
       indices: {
         existsAlias: jest.fn().mockResolvedValue(true),
-        getAlias: jest.fn().mockImplementation(async ({ name }) => {
+        getAlias: jest.fn().mockImplementation(async () => {
           return { [activeIndexName]: {} };
         }),
         create: jest.fn().mockResolvedValue({ acknowledged: true }),
@@ -58,26 +71,47 @@ describe('Reindex & Admin (e2e)', () => {
         refresh: jest.fn().mockResolvedValue({ acknowledged: true }),
         exists: jest.fn().mockResolvedValue(true),
       },
-      count: jest.fn().mockImplementation(async ({ index }) => {
+      count: jest.fn().mockImplementation(async () => {
         return { count: 48213 };
       }),
-      index: jest.fn().mockImplementation(async ({ index, id, document, op_type }) => {
-        if (id === 'active-lock') {
-          if (op_type === 'create' && activeLockHeldBy !== null) {
-            const err: any = new Error('version_conflict_engine_exception');
-            err.statusCode = 409;
-            throw err;
-          }
-          activeLockHeldBy = document.job_id;
-          return { _id: id, result: 'created' };
-        }
-        inMemoryJobStore.set(id, { ...document });
-        return { _id: id, result: 'created', _seq_no: 1, _primary_term: 1 };
-      }),
-      get: jest.fn().mockImplementation(async ({ index, id }) => {
+      index: jest
+        .fn()
+        .mockImplementation(
+          async ({
+            id,
+            document,
+            op_type,
+          }: {
+            id: string;
+            document: ReindexJobDocument;
+            op_type?: string;
+          }) => {
+            if (id === 'active-lock') {
+              if (op_type === 'create' && activeLockHeldBy !== null) {
+                const err = new Error(
+                  'version_conflict_engine_exception',
+                ) as Error & { statusCode: number };
+                err.statusCode = 409;
+                throw err;
+              }
+              activeLockHeldBy = document.job_id;
+              return { _id: id, result: 'created' };
+            }
+            inMemoryJobStore.set(id, { ...document });
+            return {
+              _id: id,
+              result: 'created',
+              _seq_no: 1,
+              _primary_term: 1,
+            };
+          },
+        ),
+      get: jest.fn().mockImplementation(async ({ id }: { id: string }) => {
         if (id === 'active-lock') {
           if (!activeLockHeldBy) {
-            const err: any = new Error('document_missing_exception');
+            const err = new Error('document_missing_exception') as Error & {
+              statusCode: number;
+            };
             err.statusCode = 404;
             throw err;
           }
@@ -92,13 +126,15 @@ describe('Reindex & Admin (e2e)', () => {
         }
         const job = inMemoryJobStore.get(id);
         if (!job) {
-          const err: any = new Error('document_missing_exception');
+          const err = new Error('document_missing_exception') as Error & {
+            statusCode: number;
+          };
           err.statusCode = 404;
           throw err;
         }
         return { _id: id, _source: job, _seq_no: 1, _primary_term: 1 };
       }),
-      delete: jest.fn().mockImplementation(async ({ index, id }) => {
+      delete: jest.fn().mockImplementation(async ({ id }: { id: string }) => {
         if (id === 'active-lock') {
           activeLockHeldBy = null;
           return { result: 'deleted' };
@@ -106,29 +142,50 @@ describe('Reindex & Admin (e2e)', () => {
         inMemoryJobStore.delete(id);
         return { result: 'deleted' };
       }),
-      search: jest.fn().mockImplementation(async ({ index, query }) => {
-        // Exclude active-lock
-        const allJobs = Array.from(inMemoryJobStore.values()).filter(
-          (j) => (j as any)._id !== 'active-lock',
-        );
+      search: jest.fn().mockImplementation(
+        async (params?: {
+          query?: {
+            bool?: {
+              must?: Array<{ terms?: { state?: string[] } }>;
+              filter?: Array<{ terms?: { state?: string[] } }>;
+            };
+          };
+        }) => {
+          // Exclude active-lock
+          let allJobs = Array.from(inMemoryJobStore.values()).filter(
+            (j) => j.job_id !== 'active-lock',
+          );
 
-        // Sort descending by started_at
-        allJobs.sort(
-          (a, b) =>
-            new Date(b.started_at).getTime() - new Date(a.started_at).getTime(),
-        );
+          const termsState =
+            params?.query?.bool?.must?.find((m) => m?.terms?.state)?.terms
+              ?.state ||
+            params?.query?.bool?.filter?.find((f) => f?.terms?.state)?.terms
+              ?.state;
 
-        return {
-          hits: {
-            total: { value: allJobs.length },
-            hits: allJobs.map((j) => ({
-              _id: j.job_id,
-              _source: j,
-            })),
-          },
-        };
-      }),
+          if (termsState && Array.isArray(termsState)) {
+            allJobs = allJobs.filter((j) => termsState.includes(j.state));
+          }
+
+          // Sort descending by started_at
+          allJobs.sort(
+            (a, b) =>
+              new Date(b.started_at).getTime() -
+              new Date(a.started_at).getTime(),
+          );
+
+          return {
+            hits: {
+              total: { value: allJobs.length },
+              hits: allJobs.map((j) => ({
+                _id: j.job_id,
+                _source: j,
+              })),
+            },
+          };
+        },
+      ),
       reindex: jest.fn().mockResolvedValue({ task: 'task-123' }),
+      close: jest.fn().mockResolvedValue(undefined),
       tasks: {
         get: jest.fn().mockResolvedValue({
           completed: true,
@@ -329,9 +386,9 @@ describe('Reindex & Admin (e2e)', () => {
         processed_count: 100,
         failed_count: 0,
         total_estimate: 1000,
-        started_at: '2026-10-14T12:00:00Z',
+        started_at: new Date().toISOString(),
         finished_at: null,
-        updated_at: '2026-10-14T12:01:00Z',
+        updated_at: new Date().toISOString(),
         error_code: null,
         trace_id: 't-1',
         request_id: 'r-1',
@@ -511,6 +568,7 @@ describe('Reindex & Admin (e2e)', () => {
   describe('GET Job Status by ID (RX-I-36 to RX-I-39)', () => {
     it('[RX-I-36] GET /api/v1/admin/search/reindex/:jobId for running job returns 200 OK', async () => {
       const jobId = 'job-01912fb8-7a1b-7c12-9c55-8b1c34a6d001';
+      const now = new Date().toISOString();
       inMemoryJobStore.set(jobId, {
         job_id: jobId,
         target_index: 'products-v1-20261014120000',
@@ -522,9 +580,9 @@ describe('Reindex & Admin (e2e)', () => {
         processed_count: 32000,
         failed_count: 4,
         total_estimate: 48213,
-        started_at: '2026-10-14T11:55:00Z',
+        started_at: now,
         finished_at: null,
-        updated_at: '2026-10-14T12:00:00Z',
+        updated_at: now,
         error_code: null,
         trace_id: 't-1',
         request_id: 'r-1',
@@ -544,8 +602,8 @@ describe('Reindex & Admin (e2e)', () => {
         failed_count: 4,
         total_estimate: 48213,
         checkpoint: 'product-01912f9a',
-        started_at: '2026-10-14T11:55:00Z',
-        updated_at: '2026-10-14T12:00:00Z',
+        started_at: now,
+        updated_at: now,
         error_code: null,
       });
     });
@@ -607,9 +665,7 @@ describe('Reindex & Admin (e2e)', () => {
         .expect(200);
 
       expect(res.body.data.state).toBe(ReindexState.FAILED);
-      expect(res.body.data.error_code).toBe(
-        'REINDEX_GATE_COUNT_MISMATCH',
-      );
+      expect(res.body.data.error_code).toBe('REINDEX_GATE_COUNT_MISMATCH');
     });
 
     it('[RX-I-39] GET /api/v1/admin/search/reindex/:jobId for non-existent jobId returns 404 SEARCH_REINDEX_NOT_FOUND', async () => {
@@ -679,9 +735,9 @@ describe('Reindex & Admin (e2e)', () => {
         processed_count: 1000,
         failed_count: 0,
         total_estimate: 48213,
-        started_at: '2026-10-14T12:00:00Z',
+        started_at: new Date().toISOString(),
         finished_at: null,
-        updated_at: '2026-10-14T12:01:00Z',
+        updated_at: new Date().toISOString(),
         error_code: null,
         trace_id: 't-1',
         request_id: 'r-1',
@@ -780,7 +836,8 @@ describe('Reindex & Admin (e2e)', () => {
         .set(validAdminHeaders)
         .expect(200);
 
-      const combinedText = JSON.stringify(statusRes.body) + JSON.stringify(jobRes.body);
+      const combinedText =
+        JSON.stringify(statusRes.body) + JSON.stringify(jobRes.body);
 
       // Asserts sensitive fields never leak
       expect(combinedText).not.toContain('authorization');
@@ -873,7 +930,9 @@ describe('Reindex & Admin (e2e)', () => {
         .set(validAdminHeaders)
         .expect(404);
 
-      expect(res.body.error.code).toBe(SearchErrorCode.SEARCH_REINDEX_NOT_FOUND);
+      expect(res.body.error.code).toBe(
+        SearchErrorCode.SEARCH_REINDEX_NOT_FOUND,
+      );
     });
   });
 
@@ -892,9 +951,9 @@ describe('Reindex & Admin (e2e)', () => {
         processed_count: 20000,
         failed_count: 0,
         total_estimate: 50000,
-        started_at: '2026-10-14T11:00:00Z',
+        started_at: new Date().toISOString(),
         finished_at: null,
-        updated_at: '2026-10-14T11:15:00Z',
+        updated_at: new Date().toISOString(),
         error_code: null,
         trace_id: 't-1',
         request_id: 'r-1',

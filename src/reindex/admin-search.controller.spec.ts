@@ -5,12 +5,7 @@ import { RequestContext } from '../common/context/request-context';
 import { ReindexState } from '../common/enums';
 import { SearchErrorCode } from '../common/errors/error-codes';
 import { SearchException } from '../common/errors/search.exception';
-import {
-  ROLES_KEY,
-  STEP_UP_KEY,
-  RolesGuard,
-  StepUpGuard,
-} from '../security';
+import { ROLES_KEY, STEP_UP_KEY, RolesGuard, StepUpGuard } from '../security';
 import { AdminSearchController } from './admin-search.controller';
 import { ReindexRequestDto, ReindexSource } from './dto/reindex-request.dto';
 import { ReindexService } from './reindex.service';
@@ -128,10 +123,10 @@ describe('AdminSearchController (Unit)', () => {
     });
 
     const createMockExecutionContext = (
-      handler: Function,
+      handler: (...args: never[]) => unknown,
     ): ExecutionContext =>
       ({
-        getHandler: () => handler,
+        getHandler: () => handler as never,
         getClass: () => AdminSearchController,
         switchToHttp: () => ({
           getRequest: () => ({}),
@@ -155,9 +150,10 @@ describe('AdminSearchController (Unit)', () => {
         );
         try {
           rolesGuard.canActivate(mockContext);
-        } catch (err: any) {
-          expect(err.code).toBe(SearchErrorCode.SEARCH_ADMIN_FORBIDDEN);
-          expect(err.getStatus()).toBe(403);
+        } catch (err: unknown) {
+          const e = err as SearchException;
+          expect(e.code).toBe(SearchErrorCode.SEARCH_ADMIN_FORBIDDEN);
+          expect(e.getStatus()).toBe(403);
         }
       });
     });
@@ -183,8 +179,9 @@ describe('AdminSearchController (Unit)', () => {
         );
         try {
           rolesGuard.canActivate(mockContext);
-        } catch (err: any) {
-          expect(err.code).toBe(SearchErrorCode.SEARCH_ADMIN_FORBIDDEN);
+        } catch (err: unknown) {
+          const e = err as SearchException;
+          expect(e.code).toBe(SearchErrorCode.SEARCH_ADMIN_FORBIDDEN);
         }
       });
     });
@@ -211,8 +208,9 @@ describe('AdminSearchController (Unit)', () => {
         );
         try {
           stepUpGuard.canActivate(mockContext);
-        } catch (err: any) {
-          expect(err.code).toBe(SearchErrorCode.SEARCH_ADMIN_FORBIDDEN);
+        } catch (err: unknown) {
+          const e = err as SearchException;
+          expect(e.code).toBe(SearchErrorCode.SEARCH_ADMIN_FORBIDDEN);
         }
       });
     });

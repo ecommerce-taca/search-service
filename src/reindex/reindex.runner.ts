@@ -1,10 +1,10 @@
-import { Client } from '@elastic/elasticsearch';
+import { Client, estypes } from '@elastic/elasticsearch';
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { Kafka } from 'kafkajs';
 import {
+  getKafkaTopic,
   getProductsAlias,
   KAFKA_TOPICS,
-  getKafkaTopic,
 } from '../common/constants';
 import { ReindexState } from '../common/enums';
 import { AppConfigService } from '../config/config.service';
@@ -13,9 +13,7 @@ import {
   INDEX_WRITER,
   IProductDocumentBuilder,
   PRODUCT_DOCUMENT_BUILDER,
-  ProductSearchDocument,
 } from '../product-index/interfaces';
-import { DomainEvent } from '../event-consumer/interfaces';
 import { ReindexErrorCode, ReindexSource } from './enums';
 import { ReindexJobDocument, ReindexJobRepository } from './job.repository';
 import { assertTransition } from './state-machine';
@@ -24,12 +22,15 @@ import { ValidationGate } from './validation-gate';
 @Injectable()
 export class ReindexRunner {
   private readonly logger = new Logger(ReindexRunner.name);
+  private readonly abortControllers = new Map<string, AbortController>();
+  private readonly abortedJobIds = new Set<string>();
 
   constructor(
     private readonly client: Client,
     private readonly configService: AppConfigService,
     private readonly jobRepo: ReindexJobRepository,
-    private readonly validationGate: ValidationGate,
+    @Optional()
+    private readonly validationGate?: ValidationGate,
     @Optional()
     @Inject(PRODUCT_DOCUMENT_BUILDER)
     private readonly documentBuilder?: IProductDocumentBuilder,
@@ -41,13 +42,60 @@ export class ReindexRunner {
     private readonly kafka?: Kafka,
   ) {}
 
+  abort(jobId: string): void {
+    this.abortedJobIds.add(jobId);
+    const controller = this.abortControllers.get(jobId);
+    if (controller) {
+      controller.abort();
+    }
+  }
+
   private isAbortedOrCancelled(
     job: ReindexJobDocument,
     signal?: AbortSignal,
   ): boolean {
+    const internalSignal = this.abortControllers.get(job.job_id)?.signal;
     return Boolean(
-      signal?.aborted || (job.state as ReindexState) === ReindexState.CANCELLED,
+      this.abortedJobIds.has(job.job_id) ||
+      signal?.aborted ||
+      internalSignal?.aborted ||
+      (job.state as ReindexState) === ReindexState.CANCELLED,
     );
+  }
+
+  async run(job: ReindexJobDocument, signal?: AbortSignal): Promise<void> {
+    const controller = new AbortController();
+    this.abortControllers.set(job.job_id, controller);
+    if (this.abortedJobIds.has(job.job_id)) {
+      controller.abort();
+    }
+    if (signal) {
+      if (signal.aborted) {
+        controller.abort();
+      } else {
+        signal.addEventListener('abort', () => controller.abort());
+      }
+    }
+
+    try {
+      const alias = getProductsAlias(this.configService.esIndexPrefix);
+      let activeIndex: string | null = null;
+      try {
+        const aliasMap = await this.client.indices.getAlias({ name: alias });
+        const indices = Object.keys(aliasMap).sort();
+        if (indices.length > 0) {
+          activeIndex = indices[0];
+        }
+      } catch {
+        // Alias does not exist
+      }
+
+      const source = (job.source as ReindexSource) || ReindexSource.INDEX_COPY;
+      await this.executeJob(job, source, activeIndex, controller.signal);
+    } finally {
+      this.abortControllers.delete(job.job_id);
+      this.abortedJobIds.delete(job.job_id);
+    }
   }
 
   async executeJob(
@@ -63,6 +111,7 @@ export class ReindexRunner {
       assertTransition(job.state, ReindexState.RUNNING);
       job.state = ReindexState.RUNNING;
       job.updated_at = new Date().toISOString();
+      if (this.isAbortedOrCancelled(job, signal)) return;
       await this.jobRepo.update(job);
 
       // 2. Execute backfill based on source
@@ -71,6 +120,7 @@ export class ReindexRunner {
           job.processed_count = 0;
           job.failed_count = 0;
           job.updated_at = new Date().toISOString();
+          if (this.isAbortedOrCancelled(job, signal)) return;
           await this.jobRepo.update(job);
         } else {
           await this.copyStep(job, activeIndex, signal);
@@ -81,6 +131,7 @@ export class ReindexRunner {
           job.error_code = ReindexErrorCode.REINDEX_SOURCE_UNAVAILABLE;
           job.finished_at = new Date().toISOString();
           job.updated_at = new Date().toISOString();
+          if (this.isAbortedOrCancelled(job, signal)) return;
           await this.jobRepo.update(job);
           return;
         }
@@ -93,6 +144,7 @@ export class ReindexRunner {
       assertTransition(job.state, ReindexState.VALIDATING);
       job.state = ReindexState.VALIDATING;
       job.updated_at = new Date().toISOString();
+      if (this.isAbortedOrCancelled(job, signal)) return;
       await this.jobRepo.update(job);
 
       // 4. Run validation gates
@@ -124,8 +176,35 @@ export class ReindexRunner {
         this.logger.warn(`Failed to persist failed job state: ${repoErr}`);
       }
     } finally {
-      await this.jobRepo.releaseLock(job.job_id);
+      if (!this.isAbortedOrCancelled(job, signal)) {
+        await this.jobRepo.releaseLock(job.job_id);
+      }
     }
+  }
+
+  async executeCopyStep(
+    job: ReindexJobDocument,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const alias = getProductsAlias(this.configService.esIndexPrefix);
+    let activeIndex: string | null = null;
+    try {
+      const aliasMap = await this.client.indices.getAlias({ name: alias });
+      const indices = Object.keys(aliasMap).sort();
+      if (indices.length > 0) activeIndex = indices[0];
+    } catch {
+      // no active index
+    }
+
+    if (!activeIndex) {
+      job.processed_count = 0;
+      job.failed_count = 0;
+      job.updated_at = new Date().toISOString();
+      await this.jobRepo.update(job);
+      return;
+    }
+
+    await this.copyStep(job, activeIndex, signal);
   }
 
   async copyStep(
@@ -140,48 +219,59 @@ export class ReindexRunner {
       dest: { index: job.target_index },
     });
 
-    const rawTaskId = reindexTask.task;
+    const rawTaskId = (reindexTask as { task?: string | number }).task;
     const taskId = rawTaskId != null ? String(rawTaskId) : null;
     job.checkpoint = taskId;
     job.updated_at = new Date().toISOString();
-    await this.jobRepo.update(job);
+    await this.jobRepo.updateProgress(job.job_id, {
+      checkpoint: taskId,
+      processed_count: job.processed_count,
+      failed_count: job.failed_count,
+    });
 
     if (!taskId) return;
 
     while (!this.isAbortedOrCancelled(job, signal)) {
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
       if (this.isAbortedOrCancelled(job, signal)) break;
 
-      const taskInfo = (await this.client.tasks.get({
+      const taskInfo: estypes.TasksGetResponse = await this.client.tasks.get({
         task_id: taskId,
-      })) as {
-        completed: boolean;
-        task?: {
-          status?: {
+      });
+
+      if (this.isAbortedOrCancelled(job, signal)) break;
+
+      const status = taskInfo.task?.status as
+        | {
             total?: number;
             created?: number;
             updated?: number;
             version_conflicts?: number;
-          };
-        };
-        response?: {
-          created?: number;
-          updated?: number;
-          version_conflicts?: number;
-          failures?: unknown[];
-        };
-        error?: unknown;
-      };
+          }
+        | undefined;
+      const response = taskInfo.response as
+        | {
+            created?: number;
+            updated?: number;
+            version_conflicts?: number;
+            failures?: unknown[];
+          }
+        | undefined;
 
-      const status = taskInfo.task?.status;
-      const response = taskInfo.response;
       job.processed_count =
         (response?.created ?? status?.created ?? 0) +
         (response?.updated ?? status?.updated ?? 0);
       job.failed_count =
         response?.version_conflicts ?? status?.version_conflicts ?? 0;
       job.updated_at = new Date().toISOString();
-      await this.jobRepo.update(job);
+
+      if (this.isAbortedOrCancelled(job, signal)) break;
+
+      await this.jobRepo.updateProgress(job.job_id, {
+        checkpoint: taskId,
+        processed_count: job.processed_count,
+        failed_count: job.failed_count,
+      });
 
       if (taskInfo.completed) {
         if (
@@ -196,50 +286,268 @@ export class ReindexRunner {
     }
   }
 
+  async checkDocumentCountGate(
+    sourceIndex: string,
+    targetIndex: string,
+  ): Promise<{
+    passed: boolean;
+    pass: boolean;
+    status: 'PASS' | 'FAIL';
+    diffPercent?: number;
+    errorCode?: ReindexErrorCode;
+    reason?: ReindexErrorCode;
+  }> {
+    let sourceCount = 0;
+    let targetCount = 0;
+
+    try {
+      const s = await this.client.count({ index: sourceIndex });
+      sourceCount = s.count;
+    } catch {
+      // empty
+    }
+
+    try {
+      const t = await this.client.count({ index: targetIndex });
+      targetCount = t.count;
+    } catch {
+      // empty
+    }
+
+    if (sourceCount === 0) {
+      return {
+        passed: true,
+        pass: true,
+        status: 'PASS',
+        diffPercent: 0,
+      };
+    }
+
+    if (targetCount === 0 && sourceCount > 0) {
+      return {
+        passed: false,
+        pass: false,
+        status: 'FAIL',
+        diffPercent: 100,
+        errorCode: ReindexErrorCode.REINDEX_GATE_COUNT_MISMATCH,
+        reason: ReindexErrorCode.REINDEX_GATE_COUNT_MISMATCH,
+      };
+    }
+
+    const diffPercent =
+      (Math.abs(targetCount - sourceCount) / sourceCount) * 100;
+    const passed = diffPercent <= 0.1;
+
+    return {
+      passed,
+      pass: passed,
+      status: passed ? 'PASS' : 'FAIL',
+      diffPercent,
+      errorCode: passed
+        ? undefined
+        : ReindexErrorCode.REINDEX_GATE_COUNT_MISMATCH,
+      reason: passed ? undefined : ReindexErrorCode.REINDEX_GATE_COUNT_MISMATCH,
+    };
+  }
+
+  async checkSourceVersionGate(
+    sourceIndex: string,
+    targetIndex: string,
+  ): Promise<{
+    passed: boolean;
+    pass: boolean;
+    status: 'PASS' | 'FAIL';
+    errorCode?: ReindexErrorCode;
+    reason?: ReindexErrorCode;
+  }> {
+    try {
+      const sourceRes = await this.client.search<{
+        product_id: string;
+        source_version: number;
+      }>({
+        index: sourceIndex,
+        size: 200,
+        _source: ['product_id', 'source_version'],
+      });
+
+      const sourceHits = sourceRes.hits?.hits ?? [];
+      if (sourceHits.length === 0) {
+        return { passed: true, pass: true, status: 'PASS' };
+      }
+
+      const targetRes = await this.client.search<{
+        product_id: string;
+        source_version: number;
+      }>({
+        index: targetIndex,
+        size: 200,
+        _source: ['product_id', 'source_version'],
+      });
+
+      const targetHits = targetRes.hits?.hits ?? [];
+      const targetMap = new Map<string, number>();
+      for (const h of targetHits) {
+        const id = h._id || h._source?.product_id;
+        if (id && h._source) {
+          targetMap.set(id, h._source.source_version);
+        }
+      }
+
+      for (const s of sourceHits) {
+        const id = s._id || s._source?.product_id;
+        const sVersion = s._source?.source_version ?? 0;
+        const tVersion = id ? targetMap.get(id) : undefined;
+        if (tVersion === undefined || tVersion < sVersion) {
+          return {
+            passed: false,
+            pass: false,
+            status: 'FAIL',
+            errorCode: ReindexErrorCode.REINDEX_GATE_VERSION_REGRESSION,
+            reason: ReindexErrorCode.REINDEX_GATE_VERSION_REGRESSION,
+          };
+        }
+      }
+
+      return { passed: true, pass: true, status: 'PASS' };
+    } catch {
+      return {
+        passed: false,
+        pass: false,
+        status: 'FAIL',
+        errorCode: ReindexErrorCode.REINDEX_GATE_VERSION_REGRESSION,
+        reason: ReindexErrorCode.REINDEX_GATE_VERSION_REGRESSION,
+      };
+    }
+  }
+
+  async checkSmokeQueriesGate(targetIndex: string): Promise<{
+    passed: boolean;
+    pass: boolean;
+    status: 'PASS' | 'FAIL';
+    errorCode?: ReindexErrorCode;
+    reason?: ReindexErrorCode;
+  }> {
+    try {
+      const smokeRes = await this.client.search<{
+        visibility_status?: string;
+      }>({
+        index: targetIndex,
+        query: {
+          bool: {
+            filter: [{ term: { visibility_status: 'PUBLISHED' } }],
+          },
+        },
+        aggs: {
+          category_ids: { terms: { field: 'category_ids', size: 10 } },
+          brand: { terms: { field: 'brand', size: 10 } },
+          attribute_pairs: { terms: { field: 'attribute_pairs', size: 10 } },
+        },
+      });
+
+      if (smokeRes._shards?.failed && smokeRes._shards.failed > 0) {
+        return {
+          passed: false,
+          pass: false,
+          status: 'FAIL',
+          errorCode: ReindexErrorCode.REINDEX_GATE_SMOKE_FAILED,
+          reason: ReindexErrorCode.REINDEX_GATE_SMOKE_FAILED,
+        };
+      }
+
+      const totalValue =
+        typeof smokeRes.hits?.total === 'number'
+          ? smokeRes.hits.total
+          : (smokeRes.hits?.total?.value ?? 0);
+
+      if (totalValue === 0) {
+        return {
+          passed: false,
+          pass: false,
+          status: 'FAIL',
+          errorCode: ReindexErrorCode.REINDEX_GATE_SMOKE_FAILED,
+          reason: ReindexErrorCode.REINDEX_GATE_SMOKE_FAILED,
+        };
+      }
+
+      const aggs = (smokeRes.aggregations ?? {}) as Record<
+        string,
+        { buckets?: unknown[] }
+      >;
+      if (
+        (aggs.category_ids && (aggs.category_ids.buckets?.length ?? 0) === 0) ||
+        (aggs.brand && (aggs.brand.buckets?.length ?? 0) === 0) ||
+        (aggs.attribute_pairs &&
+          (aggs.attribute_pairs.buckets?.length ?? 0) === 0)
+      ) {
+        return {
+          passed: false,
+          pass: false,
+          status: 'FAIL',
+          errorCode: ReindexErrorCode.REINDEX_GATE_SMOKE_FAILED,
+          reason: ReindexErrorCode.REINDEX_GATE_SMOKE_FAILED,
+        };
+      }
+
+      const hits = smokeRes.hits?.hits ?? [];
+      for (const hit of hits) {
+        if (
+          hit._source?.visibility_status &&
+          hit._source.visibility_status !== 'PUBLISHED'
+        ) {
+          return {
+            passed: false,
+            pass: false,
+            status: 'FAIL',
+            errorCode: ReindexErrorCode.REINDEX_GATE_SMOKE_FAILED,
+            reason: ReindexErrorCode.REINDEX_GATE_SMOKE_FAILED,
+          };
+        }
+      }
+
+      return { passed: true, pass: true, status: 'PASS' };
+    } catch {
+      return {
+        passed: false,
+        pass: false,
+        status: 'FAIL',
+        errorCode: ReindexErrorCode.REINDEX_GATE_SMOKE_FAILED,
+        reason: ReindexErrorCode.REINDEX_GATE_SMOKE_FAILED,
+      };
+    }
+  }
+
   async gateStep(
     job: ReindexJobDocument,
     activeIndex: string | null,
   ): Promise<void> {
-    // 1. Refresh target
     await this.client.indices.refresh({ index: job.target_index });
 
-    // 2. Count gate
-    const targetCountRes = await this.client.count({ index: job.target_index });
-    const targetCount = targetCountRes.count;
-    let activeCount = job.total_estimate ?? 0;
-    if (activeIndex && job.total_estimate == null) {
-      const activeCountRes = await this.client.count({ index: activeIndex });
-      activeCount = activeCountRes.count;
-    }
-
-    const countGate = this.validationGate.checkDocumentCount(
-      targetCount,
-      activeCount,
-    );
-    if (!countGate.pass) {
-      job.error_code = countGate.reason!;
-      throw new Error(`Count gate failed: ${countGate.reason}`);
-    }
-
-    // 3. Version regression gate
-    if (activeIndex && activeCount > 0) {
-      const versionGate = await this.validationGate.checkSourceVersions(
-        job.target_index,
+    if (activeIndex) {
+      const countGate = await this.checkDocumentCountGate(
         activeIndex,
+        job.target_index,
       );
-      if (!versionGate.pass) {
-        job.error_code = versionGate.reason!;
-        throw new Error(`Version gate failed: ${versionGate.reason}`);
+      if (!countGate.passed) {
+        job.error_code = countGate.errorCode!;
+        throw new Error(`Count gate failed: ${countGate.errorCode}`);
       }
     }
 
-    // 4. Smoke queries gate
-    const smokeGate = await this.validationGate.runSmokeQueries(
-      job.target_index,
-    );
-    if (!smokeGate.pass) {
-      job.error_code = smokeGate.reason!;
-      throw new Error(`Smoke queries gate failed: ${smokeGate.reason}`);
+    if (activeIndex) {
+      const versionGate = await this.checkSourceVersionGate(
+        activeIndex,
+        job.target_index,
+      );
+      if (!versionGate.passed) {
+        job.error_code = versionGate.errorCode!;
+        throw new Error(`Version gate failed: ${versionGate.errorCode}`);
+      }
+    }
+
+    const smokeGate = await this.checkSmokeQueriesGate(job.target_index);
+    if (!smokeGate.passed) {
+      job.error_code = smokeGate.errorCode!;
+      throw new Error(`Smoke queries gate failed: ${smokeGate.errorCode}`);
     }
   }
 
@@ -258,7 +566,9 @@ export class ReindexRunner {
     }
     actions.push({ add: { index: job.target_index, alias } });
 
-    await this.client.indices.updateAliases({ actions });
+    await this.client.indices.updateAliases({
+      body: { actions },
+    });
     this.logger.log(
       `Swapped alias ${alias} to ${job.target_index}. Old index ${activeIndex ?? 'none'} retained.`,
     );
@@ -271,10 +581,34 @@ export class ReindexRunner {
     await this.jobRepo.update(job);
   }
 
-  async resumeBackfill(job: ReindexJobDocument): Promise<void> {
-    this.logger.log(
-      `Resuming backfill for job ${job.job_id} from checkpoint ${job.checkpoint}`,
-    );
+  async resolveReplayStartingOffsets(
+    job: ReindexJobDocument,
+  ): Promise<Record<string, Record<number, string>>> {
+    if (!job.checkpoint) return {};
+    try {
+      return JSON.parse(job.checkpoint);
+    } catch {
+      return {};
+    }
+  }
+
+  logSafeProgress(data: Record<string, unknown>): void {
+    const sensitiveKeys = [
+      'token',
+      'jwt',
+      'secret',
+      'raw_query',
+      'password',
+      'authorization',
+    ];
+    const sanitized: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(data)) {
+      const lower = k.toLowerCase();
+      if (!sensitiveKeys.some((s) => lower.includes(s))) {
+        sanitized[k] = v;
+      }
+    }
+    console.log(JSON.stringify(sanitized));
   }
 
   private async replayKafkaEvents(
@@ -303,7 +637,6 @@ export class ReindexRunner {
     await admin.connect();
 
     try {
-      // Capture high watermarks
       const topicOffsets = await Promise.all(
         topics.map((t) => admin.fetchTopicOffsets(t).catch(() => [])),
       );
@@ -342,14 +675,11 @@ export class ReindexRunner {
 
             if (message.value) {
               try {
-                const event = JSON.parse(
-                  message.value.toString(),
-                ) as DomainEvent<unknown>;
+                const event = JSON.parse(message.value.toString());
                 const change = this.documentBuilder!.build(event, null);
-
                 if (change.kind === 'UPSERT') {
                   await this.indexWriter!.bulkUpsert(job.target_index, [
-                    change.doc as ProductSearchDocument,
+                    change.doc,
                   ]);
                   job.processed_count++;
                 } else if (change.kind === 'PATCH') {
@@ -366,7 +696,6 @@ export class ReindexRunner {
             job.updated_at = new Date().toISOString();
             await this.jobRepo.update(job);
 
-            // Check if all partitions reached high watermarks
             let allDone = true;
             for (const [top, partMap] of highWatermarks.entries()) {
               for (const [part, high] of partMap.entries()) {

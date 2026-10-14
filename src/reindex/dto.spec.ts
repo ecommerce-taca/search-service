@@ -15,14 +15,14 @@ describe('Reindex DTOs', () => {
       expect(errors).toHaveLength(0);
     });
 
-    it('fails when source is missing', async () => {
+    it('defaults source to INDEX_COPY when missing (D16)', async () => {
       const dto = plainToInstance(ReindexRequestDto, {
         mapping_version: 1,
         reason: 'Regular mapping update',
       });
       const errors = await validate(dto);
-      expect(errors.length).toBeGreaterThan(0);
-      expect(errors.some((e) => e.property === 'source')).toBe(true);
+      expect(errors).toHaveLength(0);
+      expect(dto.source).toBe(ReindexSource.INDEX_COPY);
     });
 
     it('fails when source is invalid', async () => {

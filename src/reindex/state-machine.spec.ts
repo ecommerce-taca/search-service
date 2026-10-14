@@ -69,7 +69,10 @@ describe('ReindexStateMachine (Unit)', () => {
         stateMachine.transition(ReindexState.RUNNING, ReindexState.CANCELLED),
       ).toBe(ReindexState.CANCELLED);
       expect(
-        stateMachine.transition(ReindexState.VALIDATING, ReindexState.CANCELLED),
+        stateMachine.transition(
+          ReindexState.VALIDATING,
+          ReindexState.CANCELLED,
+        ),
       ).toBe(ReindexState.CANCELLED);
     });
   });
@@ -107,7 +110,10 @@ describe('ReindexStateMachine (Unit)', () => {
 
     it('[RX-U-34] State machine: illegal transition VALIDATING -> REQUESTED throws exception (forward-only)', () => {
       expect(() =>
-        stateMachine.transition(ReindexState.VALIDATING, ReindexState.REQUESTED),
+        stateMachine.transition(
+          ReindexState.VALIDATING,
+          ReindexState.REQUESTED,
+        ),
       ).toThrow(IllegalStateTransitionException);
     });
 

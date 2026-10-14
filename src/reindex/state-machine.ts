@@ -7,6 +7,9 @@ export class IllegalStateException extends Error {
   }
 }
 
+export const IllegalStateTransitionException = IllegalStateException;
+export type IllegalStateTransitionException = IllegalStateException;
+
 export const ALLOWED_TRANSITIONS: Readonly<
   Record<ReindexState, readonly ReindexState[]>
 > = {
@@ -29,6 +32,8 @@ export const ALLOWED_TRANSITIONS: Readonly<
   [ReindexState.FAILED]: [],
   [ReindexState.CANCELLED]: [],
 };
+
+export const ALLOWED_REINDEX_TRANSITIONS = ALLOWED_TRANSITIONS;
 
 export function canTransition(from: ReindexState, to: ReindexState): boolean {
   return ALLOWED_TRANSITIONS[from]?.includes(to) ?? false;
@@ -61,6 +66,20 @@ export class ReindexStateMachine {
     assertTransition(this.currentState, to);
     this.currentState = to;
     return this.currentState;
+  }
+
+  transition(from: ReindexState, to: ReindexState): ReindexState {
+    assertTransition(from, to);
+    this.currentState = to;
+    return to;
+  }
+
+  isTerminal(state: ReindexState): boolean {
+    return ALLOWED_TRANSITIONS[state]?.length === 0;
+  }
+
+  canTransition(from: ReindexState, to: ReindexState): boolean {
+    return canTransition(from, to);
   }
 
   static assertTransition(from: ReindexState, to: ReindexState): void {

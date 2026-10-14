@@ -14,6 +14,7 @@ import { AdminSearchStatusQueryDto, ReindexRequestDto } from './dto';
 import { ReindexService } from './reindex.service';
 
 @Controller('admin/search')
+@AdminOnly()
 export class AdminSearchController {
   constructor(private readonly reindexService: ReindexService) {}
 
@@ -34,7 +35,7 @@ export class AdminSearchController {
 
   @Get('reindex/:jobId')
   @AdminOnly()
-  async getReindexJob(@Param('jobId') jobId: string) {
+  async getJob(@Param('jobId') jobId: string) {
     const data = await this.reindexService.getJob(jobId);
     return createResponse(data);
   }
@@ -42,8 +43,11 @@ export class AdminSearchController {
   @Post('reindex/:jobId/cancel')
   @HttpCode(HttpStatus.OK)
   @AdminOnly({ stepUp: true })
-  async cancelReindexJob(@Param('jobId') jobId: string) {
+  async cancel(@Param('jobId') jobId: string) {
     const data = await this.reindexService.cancel(jobId);
     return createResponse(data);
   }
+
+  getReindexJob = this.getJob.bind(this);
+  cancelReindexJob = this.cancel.bind(this);
 }

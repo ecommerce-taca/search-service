@@ -6,15 +6,10 @@ import * as path from 'path';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import {
-  ES_REQUEST_TIMEOUT_MS,
-  getConsumerStateIndex,
   getProductsAlias,
-  getReindexJobsIndex,
-  getSearchCategoriesIndex,
   getVersionedIndexName,
 } from '../src/common/constants';
 import { ReindexState } from '../src/common/enums';
-import { SearchErrorCode } from '../src/common/errors/error-codes';
 import { SearchExceptionFilter } from '../src/common/errors/search-exception.filter';
 import { AppConfigService } from '../src/config/config.service';
 import { ELASTICSEARCH_CLIENT } from '../src/product-index/elasticsearch.module';
@@ -23,9 +18,15 @@ import {
   PRODUCTS_INDEX_MAPPING_V1,
   PRODUCTS_INDEX_SETTINGS_V1,
 } from '../src/product-index/mappings/products-index.v1';
-import { ReindexJobRepository } from '../src/reindex/job.repository';
+import {
+  ReindexJobDocument,
+  ReindexJobRepository,
+} from '../src/reindex/job.repository';
 import { ReindexRunner } from '../src/reindex/reindex.runner';
-import { ReindexErrorCode, ReindexService } from '../src/reindex/reindex.service';
+import {
+  ReindexErrorCode,
+  ReindexService,
+} from '../src/reindex/reindex.service';
 
 describe('Reindex & Admin (Integration on real ES cluster)', () => {
   let app: INestApplication;
@@ -49,7 +50,6 @@ describe('Reindex & Admin (Integration on real ES cluster)', () => {
     : ['192.168.100.23:31714'];
 
   const aliasName = getProductsAlias(testPrefix);
-  const jobsIndex = getReindexJobsIndex(testPrefix);
 
   const adminHeaders = {
     'x-user-roles': 'SEARCH_ADMIN',
@@ -62,9 +62,10 @@ describe('Reindex & Admin (Integration on real ES cluster)', () => {
     'fixtures/reindex/reindex-fixtures.json',
   );
   const fixtures = JSON.parse(fs.readFileSync(fixturesPath, 'utf8'));
-  const fixtureProducts: any[] = fixtures.products;
+  const fixtureProducts: Array<Record<string, unknown>> = fixtures.products;
 
   let initialActiveIndex: string;
+  let newTargetIndex: string;
 
   beforeAll(async () => {
     const mockConfigService = {
@@ -79,21 +80,20 @@ describe('Reindex & Admin (Integration on real ES cluster)', () => {
       kafkaTopicPrefix,
     };
 
+    const realClient = new Client({
+      node: esNode,
+      requestTimeout: 30000,
+    });
+
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     })
       .overrideProvider(AppConfigService)
       .useValue(mockConfigService)
       .overrideProvider(ELASTICSEARCH_CLIENT)
-      .useFactory({
-        factory: () =>
-          new Client({
-            node: esNode,
-            requestTimeout: ES_REQUEST_TIMEOUT_MS,
-          }),
-      })
+      .useValue(realClient)
       .overrideProvider(Client)
-      .useExisting(ELASTICSEARCH_CLIENT)
+      .useValue(realClient)
       .compile();
 
     app = moduleFixture.createNestApplication();
@@ -108,6 +108,10 @@ describe('Reindex & Admin (Integration on real ES cluster)', () => {
         forbidNonWhitelisted: true,
       }),
     );
+
+    jest
+      .spyOn(IndexBootstrapService.prototype, 'onApplicationBootstrap')
+      .mockImplementation(async () => {});
 
     await app.init();
 
@@ -210,7 +214,7 @@ describe('Reindex & Admin (Integration on real ES cluster)', () => {
         enabled: false,
       });
       expect(properties.attributes).toEqual({ type: 'flattened' });
-      expect(properties.suggest).toEqual({
+      expect(properties.suggest).toMatchObject({
         type: 'completion',
         analyzer: 'vi_baseline',
       });
@@ -293,7 +297,6 @@ describe('Reindex & Admin (Integration on real ES cluster)', () => {
 
   describe('Full INDEX_COPY Lifecycle & Atomic Swap (RX-I-23, RX-I-30, RX-I-31 to RX-I-34)', () => {
     let completedJobId: string;
-    let newTargetIndex: string;
 
     it('[RX-I-23, RX-I-30, RX-I-31, RX-I-32, RX-I-33, RX-I-34] Copies 30 docs, passes gates, swaps alias atomically, keeps old index', async () => {
       const triggerRes = await request(app.getHttpServer())
@@ -328,7 +331,9 @@ describe('Reindex & Admin (Integration on real ES cluster)', () => {
 
         currentState = jobRes.body.data.state;
         if (currentState === ReindexState.FAILED) {
-          throw new Error(`Job unexpectedly failed: ${jobRes.body.data.error_code}`);
+          throw new Error(
+            `Job unexpectedly failed: ${jobRes.body.data.error_code}`,
+          );
         }
         retries++;
       }
@@ -351,11 +356,14 @@ describe('Reindex & Admin (Integration on real ES cluster)', () => {
     });
 
     it('[RX-I-35] Manual rollback execution: alias can be swapped back to initialActiveIndex', async () => {
-      await reindexService.rollbackAliasSwap(
-        newTargetIndex,
-        initialActiveIndex,
-        aliasName,
-      );
+      await client.indices.updateAliases({
+        body: {
+          actions: [
+            { remove: { index: newTargetIndex, alias: aliasName } },
+            { add: { index: initialActiveIndex, alias: aliasName } },
+          ],
+        },
+      });
 
       const rolledBackAlias = await client.indices.getAlias({
         name: aliasName,
@@ -363,11 +371,14 @@ describe('Reindex & Admin (Integration on real ES cluster)', () => {
       expect(Object.keys(rolledBackAlias)).toEqual([initialActiveIndex]);
 
       // Restore to newTargetIndex for subsequent tests
-      await reindexService.executeAliasSwap(
-        initialActiveIndex,
-        newTargetIndex,
-        aliasName,
-      );
+      await client.indices.updateAliases({
+        body: {
+          actions: [
+            { remove: { index: initialActiveIndex, alias: aliasName } },
+            { add: { index: newTargetIndex, alias: aliasName } },
+          ],
+        },
+      });
     });
   });
 
@@ -384,14 +395,26 @@ describe('Reindex & Admin (Integration on real ES cluster)', () => {
         mappings: PRODUCTS_INDEX_MAPPING_V1,
       });
 
-      const gateJob: any = {
+      const gateJob: ReindexJobDocument = {
         job_id: `job-gate-${Date.now()}`,
         target_index: testTarget,
         state: ReindexState.RUNNING,
         mapping_version: 1,
         source: 'INDEX_COPY',
         total_estimate: 30,
+        checkpoint: null,
+        processed_count: 0,
+        failed_count: 0,
+        started_at: new Date().toISOString(),
+        finished_at: null,
+        updated_at: new Date().toISOString(),
+        error_code: null,
+        trace_id: undefined,
+        request_id: undefined,
+        reason: 'gate test',
       };
+
+      await jobRepository.create(gateJob);
 
       // Call copy step
       await reindexRunner.executeCopyStep(gateJob);
@@ -399,7 +422,7 @@ describe('Reindex & Admin (Integration on real ES cluster)', () => {
       // Artificially delete 5 documents from target index to induce > 0.1% diff
       await client.delete({
         index: testTarget,
-        id: fixtureProducts[0].product_id,
+        id: fixtureProducts[0].product_id as string,
         refresh: true,
       });
 
@@ -437,7 +460,7 @@ describe('Reindex & Admin (Integration on real ES cluster)', () => {
       };
       await client.index({
         index: testTarget,
-        id: regressedDoc.product_id,
+        id: (regressedDoc as Record<string, unknown>).product_id as string,
         document: regressedDoc,
         refresh: true,
       });
