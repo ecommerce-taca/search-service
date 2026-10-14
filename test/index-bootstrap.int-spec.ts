@@ -125,6 +125,17 @@ describe('IndexBootstrapService (Integration on real ES cluster)', () => {
       index: searchCategoriesIndex,
     });
     expect(categoriesExists).toBe(true);
+
+    const mappingResponse = await client.indices.getMapping({
+      index: aliasName,
+    });
+    const concreteIndex = Object.keys(mappingResponse)[0];
+    const properties = (mappingResponse[concreteIndex].mappings.properties ||
+      {}) as Record<string, unknown>;
+    expect(properties.attribute_pairs).toEqual({ type: 'keyword' });
+    expect(properties.variant_skus).toEqual({ type: 'object', enabled: false });
+    expect(properties.attributes).toEqual({ type: 'flattened' });
+    expect(properties.spec_attributes).toEqual({ type: 'flattened' });
   });
 
   it('should be idempotent when called a second time', async () => {

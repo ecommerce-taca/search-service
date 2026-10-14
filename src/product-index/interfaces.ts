@@ -15,9 +15,17 @@ export interface ProductSearchDocument {
   currency: string;
   rating_avg: number;
   rating_count: number;
-  sales_count: number;
-  attributes: Record<string, unknown>;
-  spec_attributes?: Record<string, unknown>;
+  attributes: Record<string, string[]>;
+  spec_attributes?: Record<string, string[] | string>;
+  attribute_pairs?: string[];
+  variant_skus?: Record<
+    string,
+    {
+      status: string;
+      attributes: Record<string, string>;
+      version: number;
+    }
+  >;
   suggest?: string[] | { input: string[]; weight?: number };
   visibility_status: VisibilityStatus;
   source_version: number;

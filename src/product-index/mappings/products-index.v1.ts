@@ -48,6 +48,8 @@ export const PRODUCTS_INDEX_MAPPING_V1: MappingTypeMapping = {
     sales_count: { type: 'long' },
     attributes: { type: 'flattened' },
     spec_attributes: { type: 'flattened' },
+    attribute_pairs: { type: 'keyword' },
+    variant_skus: { type: 'object', enabled: false },
     suggest: {
       type: 'completion',
       analyzer: 'vi_baseline',
