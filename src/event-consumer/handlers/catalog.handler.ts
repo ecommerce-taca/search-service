@@ -17,6 +17,7 @@ export interface CatalogEventPayload {
   primary_category_id?: string;
   category_id?: string;
   category_ids?: string[];
+  secondary_category_ids?: string[];
   category_path?: string[];
   media?: Array<{ url: string; alt?: string; order?: number }>;
   cover_url?: string;
@@ -60,8 +61,19 @@ export class CatalogHandler {
 
         let categoryIds: string[] = [];
         if (primaryCatId && typeof primaryCatId === 'string') {
-          categoryIds =
+          const resolved =
             await this.categoryProjection.resolvePathIds(primaryCatId);
+          // Projection may not know the category (catalog emits no category events).
+          categoryIds = resolved.length > 0 ? resolved : [primaryCatId];
+          for (const secondary of payload.secondary_category_ids ?? []) {
+            const path =
+              await this.categoryProjection.resolvePathIds(secondary);
+            for (const id of path.length > 0 ? path : [secondary]) {
+              if (!categoryIds.includes(id)) {
+                categoryIds.push(id);
+              }
+            }
+          }
         } else if (Array.isArray(payload.category_ids)) {
           categoryIds = payload.category_ids;
         }

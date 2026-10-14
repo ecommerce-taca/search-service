@@ -16,20 +16,24 @@ export interface ProductEventPayload {
   title?: string;
   description?: string;
   brand?: string;
-  price?:
-    | number
-    | {
-        sale?: number;
-        currency?: string;
-        original?: number;
-      };
+  price?: PriceField;
+  /** Catalog `product.updated` shape: { base_price, sale_price, currency }. */
+  price_summary?: {
+    base_price?: number;
+    sale_price?: number;
+    currency?: string;
+  };
   currency?: string;
   category_path?: string[];
   category_ids?: string[];
   primary_category_id?: string;
   category_id?: string;
-  attributes?: Record<string, unknown>;
-  media?: Array<{ url: string; alt?: string; order?: number }>;
+  /**
+   * Attribute values keyed by name. Catalog `product.published` sends attribute
+   * *definitions* as an array instead; those carry no values and are ignored.
+   */
+  attributes?: Record<string, unknown> | unknown[];
+  media?: MediaField[];
   cover_url?: string;
   shop?: {
     shop_id: string;
@@ -39,6 +43,24 @@ export interface ProductEventPayload {
   published_at?: string;
   created_at?: string;
   next_status?: string;
+}
+
+export type PriceField =
+  | number
+  | {
+      /** Catalog: list price. */
+      base?: number;
+      sale?: number;
+      currency?: string;
+      original?: number;
+    };
+
+export interface MediaField {
+  url?: string;
+  alt?: string;
+  order?: number;
+  is_cover?: boolean;
+  status?: string;
 }
 
 export interface BuildContext {
@@ -149,6 +171,26 @@ export class ProductDocumentBuilder implements IProductDocumentBuilder {
         };
       }
 
+      case 'product.media_uploaded': {
+        // Catalog emits one event per uploaded file; only a cover changes the card image.
+        const media = payload as { is_cover?: boolean; url?: string };
+        if (!media.is_cover || !media.url) {
+          return { kind: 'SKIP', reason: 'NOT_APPLICABLE' };
+        }
+        return {
+          kind: 'PATCH',
+          id: productId,
+          doc: {
+            cover_url: media.url,
+            source_version: evt.version,
+            source_event_id: evt.event_id,
+            indexed_at: String(evt.occurred_at || new Date().toISOString()),
+          },
+          sourceVersion: evt.version,
+          sourceEventId: evt.event_id,
+        };
+      }
+
       default:
         return { kind: 'SKIP', reason: 'NOT_APPLICABLE' };
     }
@@ -210,8 +252,8 @@ export class ProductDocumentBuilder implements IProductDocumentBuilder {
     const title = payload.title || '';
     const brand = payload.brand || '';
 
-    const price = this.extractPrice(payload.price);
-    const currency = this.extractCurrency(payload.price, payload.currency);
+    const price = this.resolvePrice(payload);
+    const currency = this.resolveCurrency(payload);
 
     const categoryIds = context?.categoryIds || payload.category_ids || [];
 
@@ -230,9 +272,7 @@ export class ProductDocumentBuilder implements IProductDocumentBuilder {
       rating_avg: 0,
       rating_count: 0,
       attributes: {},
-      spec_attributes: payload.attributes
-        ? this.normalizeSpecAttributes(payload.attributes)
-        : undefined,
+      spec_attributes: this.specAttributesOf(payload.attributes),
       attribute_pairs: [],
       variant_skus: {},
       suggest: {
@@ -246,7 +286,7 @@ export class ProductDocumentBuilder implements IProductDocumentBuilder {
         payload.created_at ||
         (evt.occurred_at ? String(evt.occurred_at) : undefined) ||
         new Date().toISOString(),
-      cover_url: payload.media?.[0]?.url || payload.cover_url,
+      cover_url: this.pickCoverUrl(payload.media) || payload.cover_url,
       shop:
         payload.shop ||
         (payload.shop_id ? { shop_id: payload.shop_id, name: '' } : undefined),
@@ -299,17 +339,19 @@ export class ProductDocumentBuilder implements IProductDocumentBuilder {
     } else if (payload.category_ids !== undefined) {
       doc.category_ids = payload.category_ids;
     }
-    if (payload.price !== undefined) {
-      doc.price = this.extractPrice(payload.price);
-      doc.currency = this.extractCurrency(payload.price, payload.currency);
+    if (payload.price !== undefined || payload.price_summary !== undefined) {
+      doc.price = this.resolvePrice(payload);
+      doc.currency = this.resolveCurrency(payload);
     } else if (payload.currency !== undefined) {
       doc.currency = payload.currency;
     }
-    if (payload.attributes !== undefined) {
-      doc.spec_attributes = this.normalizeSpecAttributes(payload.attributes);
+    const specAttributes = this.specAttributesOf(payload.attributes);
+    if (specAttributes !== undefined) {
+      doc.spec_attributes = specAttributes;
     }
-    if (payload.media !== undefined && payload.media.length > 0) {
-      doc.cover_url = payload.media[0]?.url;
+    const coverUrl = this.pickCoverUrl(payload.media);
+    if (coverUrl) {
+      doc.cover_url = coverUrl;
     } else if (payload.cover_url !== undefined) {
       doc.cover_url = payload.cover_url;
     }
@@ -345,8 +387,8 @@ export class ProductDocumentBuilder implements IProductDocumentBuilder {
     const title = payload.title || current?.title || '';
     const brand = payload.brand || current?.brand || '';
 
-    const price = this.extractPrice(payload.price);
-    const currency = this.extractCurrency(payload.price, payload.currency);
+    const price = this.resolvePrice(payload);
+    const currency = this.resolveCurrency(payload);
 
     const categoryIds =
       context?.categoryIds ||
@@ -364,7 +406,9 @@ export class ProductDocumentBuilder implements IProductDocumentBuilder {
           : undefined);
 
     const coverUrl =
-      payload.media?.[0]?.url || payload.cover_url || current?.cover_url;
+      this.pickCoverUrl(payload.media) ||
+      payload.cover_url ||
+      current?.cover_url;
 
     const createdAt =
       current?.created_at ||
@@ -392,9 +436,8 @@ export class ProductDocumentBuilder implements IProductDocumentBuilder {
       rating_avg: current?.rating_avg ?? 0,
       rating_count: current?.rating_count ?? 0,
       attributes: current?.attributes ?? {},
-      spec_attributes: payload.attributes
-        ? this.normalizeSpecAttributes(payload.attributes)
-        : current?.spec_attributes,
+      spec_attributes:
+        this.specAttributesOf(payload.attributes) ?? current?.spec_attributes,
       attribute_pairs: current?.attribute_pairs ?? [],
       variant_skus: current?.variant_skus ?? {},
       suggest: {
@@ -416,45 +459,61 @@ export class ProductDocumentBuilder implements IProductDocumentBuilder {
     };
   }
 
-  private extractPrice(
-    priceField:
-      | number
-      | { sale?: number; currency?: string; original?: number }
-      | undefined,
-  ): number {
-    if (typeof priceField === 'number') {
-      return priceField;
+  /** sale price when set (> 0), otherwise the list price. */
+  private resolvePrice(payload: ProductEventPayload): number {
+    const field = payload.price;
+    if (typeof field === 'number') {
+      return field;
     }
-    if (typeof priceField === 'object' && priceField !== null) {
-      if (typeof priceField.sale === 'number') {
-        return priceField.sale;
+    if (typeof field === 'object' && field !== null) {
+      for (const candidate of [field.sale, field.base, field.original]) {
+        if (typeof candidate === 'number' && candidate > 0) {
+          return candidate;
+        }
       }
-      if (typeof priceField.original === 'number') {
-        return priceField.original;
+    }
+    const summary = payload.price_summary;
+    if (summary) {
+      for (const candidate of [summary.sale_price, summary.base_price]) {
+        if (typeof candidate === 'number' && candidate > 0) {
+          return candidate;
+        }
       }
     }
     return 0;
   }
 
-  private extractCurrency(
-    priceField:
-      | number
-      | { sale?: number; currency?: string; original?: number }
-      | undefined,
-    fallbackCurrency?: string,
-  ): string {
-    if (
-      typeof priceField === 'object' &&
-      priceField !== null &&
-      typeof priceField.currency === 'string' &&
-      priceField.currency.trim()
-    ) {
-      return priceField.currency;
+  private resolveCurrency(payload: ProductEventPayload): string {
+    const candidates = [
+      typeof payload.price === 'object' && payload.price !== null
+        ? payload.price.currency
+        : undefined,
+      payload.price_summary?.currency,
+      payload.currency,
+    ];
+    const found = candidates.find(
+      (c): c is string => typeof c === 'string' && c.trim().length > 0,
+    );
+    return found ?? 'VND';
+  }
+
+  /** Cover image: the media flagged `is_cover`, otherwise the first one. */
+  private pickCoverUrl(media: MediaField[] | undefined): string | undefined {
+    if (!Array.isArray(media) || media.length === 0) {
+      return undefined;
     }
-    if (typeof fallbackCurrency === 'string' && fallbackCurrency.trim()) {
-      return fallbackCurrency;
+    const usable = media.filter((m) => typeof m?.url === 'string' && m.url);
+    return (usable.find((m) => m.is_cover) ?? usable[0])?.url;
+  }
+
+  /** Only a key→value object carries attribute values; arrays are definitions. */
+  private specAttributesOf(
+    raw: Record<string, unknown> | unknown[] | undefined,
+  ): Record<string, string[] | string> | undefined {
+    if (!raw || Array.isArray(raw) || typeof raw !== 'object') {
+      return undefined;
     }
-    return 'VND';
+    return this.normalizeSpecAttributes(raw);
   }
 
   private normalizeSpecAttributes(

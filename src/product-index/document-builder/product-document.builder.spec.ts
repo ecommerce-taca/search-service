@@ -522,3 +522,133 @@ describe('ProductDocumentBuilder', () => {
     });
   });
 });
+
+describe('ProductDocumentBuilder - Product Catalog contract', () => {
+  const builder = new ProductDocumentBuilder();
+
+  const evt = (
+    event_type: string,
+    payload: Record<string, unknown>,
+    version = 2,
+  ): DomainEvent<unknown> => ({
+    event_id: `evt-${event_type}-${version}`,
+    schema_version: 1,
+    event_type,
+    occurred_at: '2026-10-14T10:00:00.000Z',
+    aggregate_type: 'PRODUCT',
+    aggregate_id: 'prod-9',
+    version,
+    payload,
+  });
+
+  const upsertDoc = (change: DocumentChange): ProductSearchDocument => {
+    if (change.kind !== 'UPSERT') {
+      throw new Error(`expected UPSERT, got ${change.kind}`);
+    }
+    return change.doc;
+  };
+
+  const published = {
+    product_id: 'prod-9',
+    shop_id: 'shop-1',
+    title: 'Điện thoại Taca X',
+    slug: 'dien-thoai-taca-x',
+    brand: 'Taca',
+    primary_category_id: 'cat-phone',
+    category_path: ['Electronics', 'Phones'],
+    visibility_status: 'PUBLISHED',
+    attributes: [
+      { key: 'color', label: 'Màu', type: 'ENUM', is_variant_dimension: true },
+    ],
+    media: [
+      { media_id: 'm1', url: 'k/first.jpg', is_cover: false, status: 'READY' },
+      { media_id: 'm2', url: 'k/cover.jpg', is_cover: true, status: 'READY' },
+    ],
+    price: { base: 1000000, sale: 900000, currency: 'VND' },
+  };
+
+  it('uses the sale price and the is_cover media of product.published', () => {
+    const doc = upsertDoc(
+      builder.build(evt('product.published', published), null),
+    );
+    expect(doc.price).toBe(900000);
+    expect(doc.cover_url).toBe('k/cover.jpg');
+    expect(doc.visibility_status).toBe(VisibilityStatus.PUBLISHED);
+  });
+
+  it('falls back to the list price when catalog sends sale 0', () => {
+    const doc = upsertDoc(
+      builder.build(
+        evt('product.published', {
+          ...published,
+          price: { base: 1000000, sale: 0, currency: 'VND' },
+        }),
+        null,
+      ),
+    );
+    expect(doc.price).toBe(1000000);
+  });
+
+  it('ignores the attribute definitions array of product.published', () => {
+    const doc = upsertDoc(
+      builder.build(evt('product.published', published), null),
+    );
+    expect(doc.spec_attributes).toBeUndefined();
+  });
+
+  it('keeps existing spec attributes when the payload only carries definitions', () => {
+    const current = {
+      product_id: 'prod-9',
+      spec_attributes: { material: 'cotton' },
+      source_version: 1,
+    } as unknown as ProductSearchDocument;
+    const doc = upsertDoc(
+      builder.build(evt('product.published', published), current),
+    );
+    expect(doc.spec_attributes).toEqual({ material: 'cotton' });
+  });
+
+  it('reads price_summary of catalog product.updated', () => {
+    const change = builder.build(
+      evt('product.updated', {
+        product_id: 'prod-9',
+        price_summary: {
+          base_price: 500000,
+          sale_price: 450000,
+          currency: 'VND',
+        },
+      }),
+      null,
+    );
+    expect(change.kind).toBe('PATCH');
+    if (change.kind === 'PATCH') {
+      expect(change.doc.price).toBe(450000);
+      expect(change.doc.currency).toBe('VND');
+    }
+  });
+
+  it('patches cover_url on product.media_uploaded only for cover media', () => {
+    const cover = builder.build(
+      evt('product.media_uploaded', {
+        product_id: 'prod-9',
+        is_cover: true,
+        url: 'https://cdn.example/new-cover.jpg',
+      }),
+      null,
+    );
+    expect(cover.kind).toBe('PATCH');
+    if (cover.kind === 'PATCH') {
+      expect(cover.doc.cover_url).toBe('https://cdn.example/new-cover.jpg');
+    }
+
+    const gallery = builder.build(
+      evt('product.media_uploaded', {
+        product_id: 'prod-9',
+        is_cover: false,
+        url: 'https://cdn.example/other.jpg',
+      }),
+      null,
+    );
+    expect(gallery).toEqual({ kind: 'SKIP', reason: 'NOT_APPLICABLE' });
+  });
+});

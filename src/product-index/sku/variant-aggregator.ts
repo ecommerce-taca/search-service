@@ -167,6 +167,52 @@ export class VariantAggregator {
   }
 
   /**
+   * Replaces the whole SKU set of a product (Catalog `product.skus_updated` is a
+   * full snapshot, SKUs missing from it were deleted). Returns null when the
+   * snapshot is older than state already applied.
+   */
+  replaceAll(
+    current: ProductSearchDocument | null,
+    skus: SkuEventPayload[],
+    version: number,
+    productId: string,
+  ): AggregatedVariantState | null {
+    const applied = Object.values(current?.variant_skus || {});
+    if (applied.some((entry) => entry.version > version)) {
+      return null;
+    }
+
+    const variantSkus: Record<string, VariantSkuEntry> = {};
+    for (const sku of skus) {
+      if (!sku?.sku_id) {
+        continue;
+      }
+      const attributes: Record<string, string> = {};
+      for (const [key, val] of Object.entries(sku.attributes || {})) {
+        if (!ATTRIBUTE_KEY_REGEX.test(key)) {
+          this.logger.warn(
+            `Invalid attribute key dropped for product_id: ${productId}`,
+          );
+          continue;
+        }
+        if (val !== null && val !== undefined) {
+          attributes[key] = String(val);
+        }
+      }
+      variantSkus[sku.sku_id] = {
+        status: String(sku.status || 'ACTIVE').toUpperCase(),
+        attributes,
+        version,
+      };
+    }
+
+    return {
+      variant_skus: variantSkus,
+      ...this.computeAttributes(productId, variantSkus),
+    };
+  }
+
+  /**
    * Recomputes attributes and attribute_pairs from all active SKUs.
    */
   computeAttributes(

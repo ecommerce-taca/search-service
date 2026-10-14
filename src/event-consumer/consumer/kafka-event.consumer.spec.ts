@@ -454,6 +454,78 @@ describe('KafkaEventConsumer & EventProcessor', () => {
     });
   });
 
+  describe('Debezium outbox router contract', () => {
+    const buildMessage = (event: Record<string, unknown>, offset = '400') => ({
+      offset,
+      value: Buffer.from(JSON.stringify(event)),
+    });
+
+    it('parses a payload delivered as a JSON string before dispatching', async () => {
+      const message = buildMessage({
+        event_id: 'evt-string-payload',
+        event_type: 'product.created',
+        aggregate_id: 'prod-str',
+        version: 1,
+        occurred_at: 1791979200000,
+        payload: JSON.stringify({ product_id: 'prod-str', title: 'Tên' }),
+      });
+
+      await eventProcessor.processMessage('test-product.events.v1', message, 0);
+
+      expect(mockProductHandler.handle).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: { product_id: 'prod-str', title: 'Tên' },
+        }),
+      );
+    });
+
+    it('routes a payload that is not valid JSON to the DLQ as INVALID_EVENT', async () => {
+      const message = buildMessage({
+        event_id: 'evt-bad-payload',
+        event_type: 'product.created',
+        aggregate_id: 'prod-bad',
+        version: 1,
+        occurred_at: 1791979200000,
+        payload: '{not json',
+      });
+
+      const result = await eventProcessor.processMessage(
+        'test-product.events.v1',
+        message,
+        0,
+      );
+
+      expect(result).toBeNull();
+      expect(mockProductHandler.handle).not.toHaveBeenCalled();
+      expect(mockProducer.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          messages: [
+            expect.objectContaining({
+              value: expect.stringContaining('INVALID_EVENT'),
+            }),
+          ],
+        }),
+      );
+    });
+
+    it('sends product.skus_updated from the product topic to the SKU handler', async () => {
+      mockSkuHandler.handleSkusUpdated = jest.fn().mockResolvedValue(undefined);
+      const message = buildMessage({
+        event_id: 'evt-skus-updated',
+        event_type: 'product.skus_updated',
+        aggregate_id: 'prod-1',
+        version: 3,
+        occurred_at: 1791979200000,
+        payload: { product_id: 'prod-1', skus: [] },
+      });
+
+      await eventProcessor.processMessage('test-product.events.v1', message, 0);
+
+      expect(mockSkuHandler.handleSkusUpdated).toHaveBeenCalledTimes(1);
+      expect(mockProductHandler.handle).not.toHaveBeenCalled();
+    });
+  });
+
   describe('[IDX-CSM-03] deduplication via search-consumer-state', () => {
     it('[IDX-CSM-03] should check consumer-state doc via GET and skip duplicates', async () => {
       mockClient.get = jest.fn().mockResolvedValueOnce({
