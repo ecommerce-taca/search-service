@@ -4,6 +4,7 @@ import {
   getConsumerStateIndex,
   getProductsAlias,
   getReindexJobsIndex,
+  getSearchCategoriesIndex,
   getVersionedIndexName,
   MAPPING_VERSION,
 } from '../common/constants';
@@ -13,6 +14,7 @@ import {
   PRODUCTS_INDEX_MAPPING_V1,
   PRODUCTS_INDEX_SETTINGS_V1,
   REINDEX_JOBS_MAPPING_V1,
+  SEARCH_CATEGORIES_MAPPING_V1,
 } from './mappings';
 
 export interface BootstrapResult {
@@ -23,6 +25,8 @@ export interface BootstrapResult {
   consumerStateCreated: boolean;
   reindexJobsIndex: string;
   reindexJobsCreated: boolean;
+  searchCategoriesIndex: string;
+  searchCategoriesCreated: boolean;
 }
 
 @Injectable()
@@ -43,6 +47,28 @@ export class IndexBootstrapService implements OnApplicationBootstrap {
     }
   }
 
+  private isResourceAlreadyExistsError(err: unknown): boolean {
+    if (!err || typeof err !== 'object') return false;
+    const anyErr = err as {
+      meta?: {
+        statusCode?: number;
+        body?: {
+          error?: {
+            type?: string;
+          };
+        };
+      };
+      message?: string;
+    };
+    return (
+      anyErr.meta?.body?.error?.type === 'resource_already_exists_exception' ||
+      Boolean(
+        anyErr.message &&
+        anyErr.message.includes('resource_already_exists_exception'),
+      )
+    );
+  }
+
   async bootstrap(): Promise<BootstrapResult> {
     const prefix = this.configService.esIndexPrefix;
     const alias = getProductsAlias(prefix);
@@ -58,23 +84,67 @@ export class IndexBootstrapService implements OnApplicationBootstrap {
         undefined,
         prefix,
       );
-      const indexExists = await this.client.indices.exists({
-        index: activeTargetIndex,
-      });
-      if (!indexExists) {
+
+      try {
         await this.client.indices.create({
           index: activeTargetIndex,
           settings: PRODUCTS_INDEX_SETTINGS_V1,
           mappings: PRODUCTS_INDEX_MAPPING_V1,
         });
+      } catch (err: unknown) {
+        if (!this.isResourceAlreadyExistsError(err)) {
+          throw err;
+        }
       }
 
-      await this.client.indices.putAlias({
-        index: activeTargetIndex,
-        name: alias,
+      await this.client.indices.updateAliases({
+        actions: [
+          {
+            add: {
+              index: activeTargetIndex,
+              alias,
+            },
+          },
+        ],
       });
       aliasCreated = true;
+
+      // Re-read alias to check if another replica concurrently added to it
+      const aliasMap = await this.client.indices.getAlias({ name: alias });
+      const aliasedIndices = Object.keys(aliasMap).sort();
+
+      if (aliasedIndices.length > 1) {
+        const keeper = aliasedIndices[0];
+        const others = aliasedIndices.slice(1);
+
+        await this.client.indices.updateAliases({
+          actions: others.map((otherIndex) => ({
+            remove: {
+              index: otherIndex,
+              alias,
+            },
+          })),
+        });
+
+        // Delete the one this instance created if it is not the keeper
+        if (others.includes(activeTargetIndex)) {
+          try {
+            await this.client.indices.delete({ index: activeTargetIndex });
+          } catch (err: unknown) {
+            this.logger.debug?.(
+              `Index ${activeTargetIndex} already deleted: ${err}`,
+            );
+          }
+        }
+        activeTargetIndex = keeper;
+      }
       this.logger.log(`Created index ${activeTargetIndex} and alias ${alias}`);
+    } else {
+      const aliasMap = await this.client.indices.getAlias({ name: alias });
+      const aliasedIndices = Object.keys(aliasMap).sort();
+      if (aliasedIndices.length > 0) {
+        activeTargetIndex = aliasedIndices[0];
+      }
     }
 
     // 2. Ensure search-consumer-state index exists
@@ -84,12 +154,18 @@ export class IndexBootstrapService implements OnApplicationBootstrap {
       index: consumerStateIndex,
     });
     if (!consumerStateExists) {
-      await this.client.indices.create({
-        index: consumerStateIndex,
-        mappings: CONSUMER_STATE_MAPPING_V1,
-      });
-      consumerStateCreated = true;
-      this.logger.log(`Created internal index ${consumerStateIndex}`);
+      try {
+        await this.client.indices.create({
+          index: consumerStateIndex,
+          mappings: CONSUMER_STATE_MAPPING_V1,
+        });
+        consumerStateCreated = true;
+        this.logger.log(`Created internal index ${consumerStateIndex}`);
+      } catch (err: unknown) {
+        if (!this.isResourceAlreadyExistsError(err)) {
+          throw err;
+        }
+      }
     }
 
     // 3. Ensure search-reindex-jobs index exists
@@ -99,12 +175,39 @@ export class IndexBootstrapService implements OnApplicationBootstrap {
       index: reindexJobsIndex,
     });
     if (!reindexJobsExists) {
-      await this.client.indices.create({
-        index: reindexJobsIndex,
-        mappings: REINDEX_JOBS_MAPPING_V1,
-      });
-      reindexJobsCreated = true;
-      this.logger.log(`Created internal index ${reindexJobsIndex}`);
+      try {
+        await this.client.indices.create({
+          index: reindexJobsIndex,
+          mappings: REINDEX_JOBS_MAPPING_V1,
+        });
+        reindexJobsCreated = true;
+        this.logger.log(`Created internal index ${reindexJobsIndex}`);
+      } catch (err: unknown) {
+        if (!this.isResourceAlreadyExistsError(err)) {
+          throw err;
+        }
+      }
+    }
+
+    // 4. Ensure search-categories index exists
+    const searchCategoriesIndex = getSearchCategoriesIndex(prefix);
+    let searchCategoriesCreated = false;
+    const searchCategoriesExists = await this.client.indices.exists({
+      index: searchCategoriesIndex,
+    });
+    if (!searchCategoriesExists) {
+      try {
+        await this.client.indices.create({
+          index: searchCategoriesIndex,
+          mappings: SEARCH_CATEGORIES_MAPPING_V1,
+        });
+        searchCategoriesCreated = true;
+        this.logger.log(`Created internal index ${searchCategoriesIndex}`);
+      } catch (err: unknown) {
+        if (!this.isResourceAlreadyExistsError(err)) {
+          throw err;
+        }
+      }
     }
 
     return {
@@ -115,6 +218,8 @@ export class IndexBootstrapService implements OnApplicationBootstrap {
       consumerStateCreated,
       reindexJobsIndex,
       reindexJobsCreated,
+      searchCategoriesIndex,
+      searchCategoriesCreated,
     };
   }
 }
