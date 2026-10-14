@@ -10,6 +10,7 @@ import {
 import { SearchExceptionFilter } from '../src/common/errors/search-exception.filter';
 import { IndexBootstrapService } from '../src/product-index/index-bootstrap.service';
 import { ELASTICSEARCH_CLIENT } from '../src/product-index/elasticsearch.module';
+import { ReadinessService } from '../src/health/readiness.service';
 
 describe('Health & Readiness (e2e)', () => {
   let app: INestApplication;
@@ -142,5 +143,69 @@ describe('Health & Readiness (e2e)', () => {
         trace_id: expect.any(String),
       },
     });
+  });
+
+  it('HL-E-04: GET /api/v1/search/health returns 200 with consumer DEGRADED and event_lag_seconds 120 (D14)', async () => {
+    const readinessService = app.get(ReadinessService);
+    jest.spyOn(readinessService, 'check').mockResolvedValueOnce({
+      elasticsearch: 'UP',
+      alias: 'products-read',
+      consumer: 'DEGRADED',
+      event_lag_seconds: 120,
+    });
+
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/search/health')
+      .expect(200);
+
+    expect(res.body).toEqual({
+      data: {
+        elasticsearch: 'UP',
+        alias: 'products-read',
+        consumer: 'DEGRADED',
+        event_lag_seconds: 120,
+      },
+      meta: {
+        request_id: expect.any(String),
+      },
+    });
+  });
+
+  it('HL-E-05: GET /health/live returns 200 even when Elasticsearch is DOWN', async () => {
+    mockEsClient.cluster.health.mockRejectedValue(
+      new errors.ConnectionError(
+        'Elasticsearch down',
+        {} as unknown as ConstructorParameters<
+          typeof errors.ConnectionError
+        >[1],
+      ),
+    );
+
+    const res = await request(app.getHttpServer())
+      .get('/health/live')
+      .expect(200);
+
+    expect(res.body).toEqual({
+      data: {
+        status: 'UP',
+        service: 'search-service',
+        time: expect.any(String),
+      },
+      meta: {
+        request_id: expect.any(String),
+      },
+    });
+  });
+
+  it('HL-E-06: GET /api/v1/search/health complies with standard JSON success envelope and headers', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/search/health')
+      .expect(200);
+
+    expect(res.body).toHaveProperty('data');
+    expect(res.body).toHaveProperty('meta');
+    expect(res.body.meta).toHaveProperty('request_id');
+    expect(typeof res.body.data.elasticsearch).toBe('string');
+    expect(typeof res.body.data.alias).toBe('string');
   });
 });

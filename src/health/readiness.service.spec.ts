@@ -118,7 +118,7 @@ describe('ReadinessService (Unit)', () => {
       });
     });
 
-    it('HL-U-02b: throws SEARCH_UNAVAILABLE 503 when ES cluster.health status is red', async () => {
+    it('HL-U-02: throws SEARCH_UNAVAILABLE 503 when ES cluster.health status is red', async () => {
       mockEsClient.cluster.health.mockResolvedValue({ status: 'red' });
       service = await createService();
 

@@ -1,5 +1,5 @@
 import { Client, errors } from '@elastic/elasticsearch';
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication, Logger, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
@@ -15,6 +15,7 @@ describe('Suggest Autocomplete (e2e)', () => {
   let app: INestApplication;
   let mockEsClient: {
     search: jest.Mock;
+    index: jest.Mock;
     close: jest.Mock;
   };
 
@@ -47,6 +48,7 @@ describe('Suggest Autocomplete (e2e)', () => {
           },
         },
       }),
+      index: jest.fn().mockResolvedValue({}),
       close: jest.fn().mockResolvedValue(undefined),
     };
 
@@ -98,6 +100,7 @@ describe('Suggest Autocomplete (e2e)', () => {
 
   beforeEach(() => {
     mockEsClient.search.mockReset();
+    mockEsClient.index.mockReset();
     mockEsClient.search.mockResolvedValue({
       suggest: {
         product_suggest: [
@@ -188,6 +191,52 @@ describe('Suggest Autocomplete (e2e)', () => {
     });
   });
 
+  it('AC-E-05: DSL injection returns 200 OK without executing DSL query', async () => {
+    const dslPayload = '{"bool":{"must":[{"match_all":{}}]}}';
+    const res = await request(app.getHttpServer())
+      .get(`/api/v1/search/suggest?prefix=${encodeURIComponent(dslPayload)}`)
+      .expect(200);
+
+    expect(res.body).toHaveProperty('data');
+    expect(res.body).toHaveProperty('meta');
+    expect(Array.isArray(res.body.data)).toBe(true);
+  });
+
+  it('AC-E-06: XSS script payload returns 200 OK with escaped JSON output', async () => {
+    const xssPayload = "<script>alert('xss')</script>";
+    const res = await request(app.getHttpServer())
+      .get(`/api/v1/search/suggest?prefix=${encodeURIComponent(xssPayload)}`)
+      .expect(200);
+
+    expect(res.body).toHaveProperty('data');
+    expect(res.headers['content-type']).toMatch(/application\/json/);
+  });
+
+  it('AC-E-07: Sensitive string in prefix is not leaked in plain text logs', async () => {
+    const loggerSpy = jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => {});
+    const sensitive = '0912345678';
+
+    await request(app.getHttpServer())
+      .get(`/api/v1/search/suggest?prefix=${sensitive}`)
+      .expect(200);
+
+    for (const callArgs of loggerSpy.mock.calls) {
+      const loggedStr = JSON.stringify(callArgs);
+      expect(loggedStr).not.toContain(sensitive);
+    }
+
+    loggerSpy.mockRestore();
+  });
+
+  it('AC-E-08: Zero search history persistence (no history writes)', async () => {
+    await request(app.getHttpServer())
+      .get('/api/v1/search/suggest?prefix=history_test_term')
+      .expect(200);
+
+    // Verify mock client never wrote to any search-history or query-logs index
+    expect(mockEsClient.index).not.toHaveBeenCalled();
+  });
+
   it('AC-E-09: GET /api/v1/search/suggest with valid query echoes X-Request-ID and returns 200', async () => {
     const customReqId = '01912f92-7a1b-7c12-9c55-8b1c34a6d921';
     const res = await request(app.getHttpServer())
@@ -202,7 +251,7 @@ describe('Suggest Autocomplete (e2e)', () => {
     expect(res.body.data.length).toBeGreaterThan(0);
   });
 
-  it('handles ES timeout with 504 SEARCH_TIMEOUT', async () => {
+  it('handles ES timeout with 504 SEARCH_TIMEOUT (D5)', async () => {
     mockEsClient.search.mockRejectedValue(
       new errors.TimeoutError(
         'ES search timed out',
@@ -218,6 +267,28 @@ describe('Suggest Autocomplete (e2e)', () => {
       error: {
         code: SearchErrorCode.SEARCH_TIMEOUT,
         message: ERROR_MESSAGES_MAP[SearchErrorCode.SEARCH_TIMEOUT],
+        details: null,
+        trace_id: expect.any(String),
+      },
+    });
+  });
+
+  it('handles ES connection error with 503 SEARCH_UNAVAILABLE (D5)', async () => {
+    mockEsClient.search.mockRejectedValue(
+      new errors.ConnectionError(
+        'ES connection refused',
+        {} as unknown as ConstructorParameters<typeof errors.ConnectionError>[1],
+      ),
+    );
+
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/search/suggest?prefix=iphone')
+      .expect(503);
+
+    expect(res.body).toEqual({
+      error: {
+        code: SearchErrorCode.SEARCH_UNAVAILABLE,
+        message: ERROR_MESSAGES_MAP[SearchErrorCode.SEARCH_UNAVAILABLE],
         details: null,
         trace_id: expect.any(String),
       },

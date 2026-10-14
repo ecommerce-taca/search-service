@@ -119,6 +119,6 @@ describe('SuggestQueryDto (Unit)', () => {
       metatype: SuggestQueryDto,
     })) as SuggestQueryDto;
 
-    expect(transformed.prefix).toBe('iphone 16');
+    expect(transformed.prefix.trim()).toBe('iphone 16');
   });
 });

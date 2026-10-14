@@ -77,7 +77,7 @@ describe('Security Acceptance (D15) (e2e)', () => {
     await app.close();
   });
 
-  it('anonymous → 403 SEARCH_ADMIN_FORBIDDEN', async () => {
+  it('SEC-E-01: anonymous → 403 SEARCH_ADMIN_FORBIDDEN', async () => {
     const res = await request(app.getHttpServer())
       .get('/api/v1/admin-test/basic')
       .expect(403);
@@ -92,7 +92,7 @@ describe('Security Acceptance (D15) (e2e)', () => {
     });
   });
 
-  it('role SELLER → 403 SEARCH_ADMIN_FORBIDDEN', async () => {
+  it('SEC-E-02: role SELLER → 403 SEARCH_ADMIN_FORBIDDEN', async () => {
     const res = await request(app.getHttpServer())
       .get('/api/v1/admin-test/basic')
       .set('x-user-roles', 'SELLER')
@@ -108,7 +108,32 @@ describe('Security Acceptance (D15) (e2e)', () => {
     });
   });
 
-  it('SEARCH_ADMIN on stepUp route without header → 403 SEARCH_ADMIN_FORBIDDEN', async () => {
+  it('SEC-E-02: role BUYER → 403 SEARCH_ADMIN_FORBIDDEN', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/admin-test/basic')
+      .set('x-user-roles', 'BUYER')
+      .expect(403);
+
+    expect(res.body).toEqual({
+      error: {
+        code: SearchErrorCode.SEARCH_ADMIN_FORBIDDEN,
+        message: ERROR_MESSAGES_MAP[SearchErrorCode.SEARCH_ADMIN_FORBIDDEN],
+        details: null,
+        trace_id: expect.any(String),
+      },
+    });
+  });
+
+  it('SEC-E-03: SEARCH_ADMIN on basic route without step-up → 200 OK', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/admin-test/basic')
+      .set('x-user-roles', 'SEARCH_ADMIN')
+      .expect(200);
+
+    expect(res.body).toEqual({ status: 'admin-ok' });
+  });
+
+  it('SEC-E-04: SEARCH_ADMIN on stepUp route without header → 403 SEARCH_ADMIN_FORBIDDEN', async () => {
     const res = await request(app.getHttpServer())
       .get('/api/v1/admin-test/step-up')
       .set('x-user-roles', 'SEARCH_ADMIN')
@@ -124,17 +149,7 @@ describe('Security Acceptance (D15) (e2e)', () => {
     });
   });
 
-  it('SEARCH_ADMIN on stepUp route with X-MFA-Step-Up: true → 200', async () => {
-    const res = await request(app.getHttpServer())
-      .get('/api/v1/admin-test/step-up')
-      .set('x-user-roles', 'SEARCH_ADMIN')
-      .set('x-mfa-step-up', 'true')
-      .expect(200);
-
-    expect(res.body).toEqual({ status: 'step-up-ok' });
-  });
-
-  it('SEARCH_ADMIN on stepUp route with X-MFA-Step-Up: false → 403 SEARCH_ADMIN_FORBIDDEN', async () => {
+  it('SEC-E-05: SEARCH_ADMIN on stepUp route with X-MFA-Step-Up: false → 403 SEARCH_ADMIN_FORBIDDEN', async () => {
     const res = await request(app.getHttpServer())
       .get('/api/v1/admin-test/step-up')
       .set('x-user-roles', 'SEARCH_ADMIN')
@@ -149,6 +164,26 @@ describe('Security Acceptance (D15) (e2e)', () => {
         trace_id: expect.any(String),
       },
     });
+  });
+
+  it('SEC-E-06: SEARCH_ADMIN on stepUp route with X-MFA-Step-Up: true → 200', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/admin-test/step-up')
+      .set('x-user-roles', 'SEARCH_ADMIN')
+      .set('x-mfa-step-up', 'true')
+      .expect(200);
+
+    expect(res.body).toEqual({ status: 'step-up-ok' });
+  });
+
+  it('SEC-E-06: SEARCH_ADMIN on stepUp route with X-MFA-Step-Up: 1 → 200', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/admin-test/step-up')
+      .set('x-user-roles', 'SEARCH_ADMIN')
+      .set('x-mfa-step-up', '1')
+      .expect(200);
+
+    expect(res.body).toEqual({ status: 'step-up-ok' });
   });
 
   it('spoofed role casing search_admin → 403 SEARCH_ADMIN_FORBIDDEN', async () => {

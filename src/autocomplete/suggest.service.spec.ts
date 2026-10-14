@@ -1,4 +1,5 @@
 import { Client, errors } from '@elastic/elasticsearch';
+import { Logger } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ES_REQUEST_TIMEOUT_MS, getProductsAlias } from '../common/constants';
 import { SuggestionType } from '../common/enums';
@@ -7,7 +8,12 @@ import { SearchException } from '../common/errors/search.exception';
 import { AppConfigService } from '../config/config.service';
 import { ELASTICSEARCH_CLIENT } from '../product-index/elasticsearch.module';
 import { SuggestQueryDto } from './dto/suggest.query';
-import { extractPhrase, foldText, SuggestService } from './suggest.service';
+import {
+  extractPhrase,
+  foldText,
+  SuggestService,
+  Suggestion,
+} from './suggest.service';
 
 describe('SuggestService (Unit)', () => {
   let service: SuggestService;
@@ -75,19 +81,31 @@ describe('SuggestService (Unit)', () => {
     });
   });
 
-  describe('Prefix validation', () => {
-    it('throws SEARCH_INVALID_INPUT when prefix is missing or empty', async () => {
+  describe('Prefix validation and code point length', () => {
+    it('AC-U-01: throws SEARCH_INVALID_INPUT when prefix is missing or undefined', async () => {
+      await expect(
+        service.suggest({} as unknown as SuggestQueryDto),
+      ).rejects.toMatchObject({
+        errorCode: SearchErrorCode.SEARCH_INVALID_INPUT,
+      });
+
+      expect(mockEsClient.search).not.toHaveBeenCalled();
+    });
+
+    it('AC-U-02: throws SEARCH_INVALID_INPUT when prefix is empty or whitespace', async () => {
       await expect(
         service.suggest({ prefix: '' } as SuggestQueryDto),
       ).rejects.toMatchObject({
-        code: SearchErrorCode.SEARCH_INVALID_INPUT,
+        errorCode: SearchErrorCode.SEARCH_INVALID_INPUT,
       });
 
       await expect(
         service.suggest({ prefix: '   ' } as SuggestQueryDto),
       ).rejects.toMatchObject({
-        code: SearchErrorCode.SEARCH_INVALID_INPUT,
+        errorCode: SearchErrorCode.SEARCH_INVALID_INPUT,
       });
+
+      expect(mockEsClient.search).not.toHaveBeenCalled();
     });
 
     it('AC-U-03: throws SearchException SEARCH_QUERY_TOO_LONG when prefix exceeds 100 code points', async () => {
@@ -96,7 +114,6 @@ describe('SuggestService (Unit)', () => {
 
       await expect(service.suggest(queryDto)).rejects.toThrow(SearchException);
       await expect(service.suggest(queryDto)).rejects.toMatchObject({
-        code: SearchErrorCode.SEARCH_QUERY_TOO_LONG,
         errorCode: SearchErrorCode.SEARCH_QUERY_TOO_LONG,
       });
 
@@ -108,7 +125,6 @@ describe('SuggestService (Unit)', () => {
       const queryDto: SuggestQueryDto = { prefix: emoji101, limit: 10 };
 
       await expect(service.suggest(queryDto)).rejects.toMatchObject({
-        code: SearchErrorCode.SEARCH_QUERY_TOO_LONG,
         errorCode: SearchErrorCode.SEARCH_QUERY_TOO_LONG,
       });
 
@@ -133,6 +149,41 @@ describe('SuggestService (Unit)', () => {
           requestTimeout: ES_REQUEST_TIMEOUT_MS,
         }),
       );
+    });
+
+    it('AC-U-08: throws SEARCH_INVALID_INPUT for invalid limit parameter in service call', async () => {
+      await expect(
+        service.suggest({ prefix: 'iphone', limit: -1 }),
+      ).rejects.toMatchObject({
+        errorCode: SearchErrorCode.SEARCH_INVALID_INPUT,
+      });
+
+      await expect(
+        service.suggest({ prefix: 'iphone', limit: 15 }),
+      ).rejects.toMatchObject({
+        errorCode: SearchErrorCode.SEARCH_INVALID_INPUT,
+      });
+    });
+  });
+
+  describe('Logging requirements', () => {
+    it('never logs raw prefix string, only its length (Design requirement)', async () => {
+      const loggerSpy = jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => {});
+      mockEsClient.search.mockResolvedValueOnce({
+        suggest: { product_suggest: [] },
+        hits: { hits: [] },
+        aggregations: { brand_terms: { buckets: [] } },
+      });
+
+      const sensitivePrefix = 'sensitive_query_secret';
+      await service.suggest({ prefix: sensitivePrefix, limit: 10 });
+
+      for (const callArgs of loggerSpy.mock.calls) {
+        const loggedContent = JSON.stringify(callArgs);
+        expect(loggedContent).not.toContain(sensitivePrefix);
+      }
+
+      loggerSpy.mockRestore();
     });
   });
 
@@ -159,26 +210,14 @@ describe('SuggestService (Unit)', () => {
   });
 
   describe('QUERY suggestion generation and ranking (D11)', () => {
-    it('extracts matching phrases truncated to max 6 words, lower-cased, ranked by count desc then alphabetical', async () => {
+    it('extracts matching phrases truncated to max 6 words at word boundary, lower-cased, ranked by count desc then alphabetical', async () => {
       mockEsClient.search.mockResolvedValueOnce({
         suggest: { product_suggest: [] },
         hits: {
           hits: [
-            {
-              _source: {
-                title: 'Áo khoác cotton nam cao cấp mùa đông ấm áp siêu nhẹ',
-              },
-            },
-            {
-              _source: {
-                title: 'Áo khoác cotton nam cao cấp form rộng',
-              },
-            },
-            {
-              _source: {
-                title: 'Áo khoác gió thể thao năng động trẻ trung',
-              },
-            },
+            { _source: { title: 'Áo khoác cotton nam cao cấp mùa đông ấm áp siêu nhẹ' } },
+            { _source: { title: 'Áo khoác cotton nam cao cấp form rộng' } },
+            { _source: { title: 'Áo khoác gió thể thao năng động trẻ trung' } },
           ],
         },
         aggregations: { brand_terms: { buckets: [] } },
@@ -186,9 +225,7 @@ describe('SuggestService (Unit)', () => {
 
       const result = await service.suggest({ prefix: 'ao', limit: 10 });
 
-      const querySuggestions = result.filter(
-        (s) => s.type === SuggestionType.QUERY,
-      );
+      const querySuggestions = result.filter((s: Suggestion) => s.type === SuggestionType.QUERY);
       expect(querySuggestions.length).toBeGreaterThan(0);
 
       for (const qs of querySuggestions) {
@@ -200,7 +237,7 @@ describe('SuggestService (Unit)', () => {
       }
     });
 
-    it('ranks phrases by frequency then alphabetically', async () => {
+    it('ranks phrases by number of matching titles (frequency), then alphabetically', async () => {
       mockEsClient.search.mockResolvedValueOnce({
         suggest: { product_suggest: [] },
         hits: {
@@ -214,9 +251,7 @@ describe('SuggestService (Unit)', () => {
       });
 
       const result = await service.suggest({ prefix: 'ao', limit: 10 });
-      const querySuggestions = result.filter(
-        (s) => s.type === SuggestionType.QUERY,
-      );
+      const querySuggestions = result.filter((s: Suggestion) => s.type === SuggestionType.QUERY);
 
       expect(querySuggestions.length).toBe(2);
       expect(querySuggestions[0].text).toContain('áo khoác dù');
@@ -267,9 +302,7 @@ describe('SuggestService (Unit)', () => {
       });
 
       const result = await service.suggest({ prefix: 'ao', limit: 10 });
-      const productSuggestions = result.filter(
-        (s) => s.type === SuggestionType.PRODUCT,
-      );
+      const productSuggestions = result.filter((s: Suggestion) => s.type === SuggestionType.PRODUCT);
 
       expect(productSuggestions.length).toBe(1);
       expect(productSuggestions[0].product_id).toBe('prod-1');
@@ -314,9 +347,7 @@ describe('SuggestService (Unit)', () => {
         category_id: 'cat-outerwear',
       });
 
-      const productSuggestions = result.filter(
-        (s) => s.type === SuggestionType.PRODUCT,
-      );
+      const productSuggestions = result.filter((s: Suggestion) => s.type === SuggestionType.PRODUCT);
       expect(productSuggestions.length).toBe(1);
       expect(productSuggestions[0].product_id).toBe('prod-1');
     });
@@ -345,7 +376,7 @@ describe('SuggestService (Unit)', () => {
       });
 
       const result = await service.suggest({ prefix: 'iphone', limit: 10 });
-      const product = result.find((s) => s.type === SuggestionType.PRODUCT);
+      const product = result.find((s: Suggestion) => s.type === SuggestionType.PRODUCT);
 
       expect(product).toBeDefined();
       expect(product?.product_id).toBe('product-01912f31');
@@ -370,10 +401,10 @@ describe('SuggestService (Unit)', () => {
       });
 
       const result = await service.suggest({ prefix: 'ap', limit: 10 });
-      const brands = result.filter((s) => s.type === SuggestionType.BRAND);
+      const brands = result.filter((s: Suggestion) => s.type === SuggestionType.BRAND);
 
       expect(brands.length).toBe(2);
-      expect(brands.map((b) => b.text)).toEqual(['Apple', 'Apex']);
+      expect(brands.map((b: Suggestion) => b.text)).toEqual(['Apple', 'Apex']);
     });
 
     it('AC-U-12: omits product_id completely for QUERY and BRAND types', async () => {
@@ -390,8 +421,8 @@ describe('SuggestService (Unit)', () => {
       });
 
       const result = await service.suggest({ prefix: 'ip', limit: 10 });
-      const queryItem = result.find((s) => s.type === SuggestionType.QUERY);
-      const brandItem = result.find((s) => s.type === SuggestionType.BRAND);
+      const queryItem = result.find((s: Suggestion) => s.type === SuggestionType.QUERY);
+      const brandItem = result.find((s: Suggestion) => s.type === SuggestionType.BRAND);
 
       expect(queryItem).toBeDefined();
       expect(queryItem).not.toHaveProperty('product_id');
@@ -466,7 +497,7 @@ describe('SuggestService (Unit)', () => {
 
       const result = await service.suggest({ prefix: 'iphone', limit: 10 });
 
-      const textsFolded = result.map((r) => r.text.toLowerCase().trim());
+      const textsFolded = result.map((r: Suggestion) => r.text.toLowerCase().trim());
       const uniqueTexts = new Set(textsFolded);
       expect(textsFolded.length).toBe(uniqueTexts.size);
     });
@@ -487,7 +518,7 @@ describe('SuggestService (Unit)', () => {
       });
 
       const result = await service.suggest({ prefix: 'app', limit: 10 });
-      const brands = result.filter((s) => s.type === SuggestionType.BRAND);
+      const brands = result.filter((s: Suggestion) => s.type === SuggestionType.BRAND);
 
       expect(brands.length).toBe(1);
       expect(brands[0].text).toBe('Apple');
@@ -525,7 +556,7 @@ describe('SuggestService (Unit)', () => {
       const injectionPayloads = [
         '{"bool":{"must":[{"match_all":{}}]}}',
         '<script>alert("xss")</script>',
-        "ao' OR '1'='1' --",
+        'ao\' OR \'1\'=\'1\' --',
         'title:* OR brand:*',
         '.*+?^${}()|[]\\',
       ];
@@ -540,10 +571,7 @@ describe('SuggestService (Unit)', () => {
         const result = await service.suggest({ prefix: payload, limit: 10 });
         expect(Array.isArray(result)).toBe(true);
 
-        const callArgs =
-          mockEsClient.search.mock.calls[
-            mockEsClient.search.mock.calls.length - 1
-          ][0];
+        const callArgs = mockEsClient.search.mock.calls[mockEsClient.search.mock.calls.length - 1][0];
         expect(callArgs).toBeDefined();
       }
     });
@@ -558,48 +586,35 @@ describe('SuggestService (Unit)', () => {
         ),
       );
 
-      await expect(service.suggest({ prefix: 'iphone' })).rejects.toMatchObject(
-        {
-          code: SearchErrorCode.SEARCH_TIMEOUT,
-          errorCode: SearchErrorCode.SEARCH_TIMEOUT,
-        },
-      );
+      await expect(service.suggest({ prefix: 'iphone' })).rejects.toMatchObject({
+        errorCode: SearchErrorCode.SEARCH_TIMEOUT,
+      });
     });
 
     it('maps ResponseError 404 / index_not_found_exception to 503 SEARCH_INDEX_NOT_READY', async () => {
       const err = new errors.ResponseError({
         body: { error: { type: 'index_not_found_exception' } },
         statusCode: 404,
-        warnings: [],
-        headers: {},
       } as unknown as ConstructorParameters<typeof errors.ResponseError>[0]);
 
       mockEsClient.search.mockRejectedValueOnce(err);
 
-      await expect(service.suggest({ prefix: 'iphone' })).rejects.toMatchObject(
-        {
-          code: SearchErrorCode.SEARCH_INDEX_NOT_READY,
-          errorCode: SearchErrorCode.SEARCH_INDEX_NOT_READY,
-        },
-      );
+      await expect(service.suggest({ prefix: 'iphone' })).rejects.toMatchObject({
+        errorCode: SearchErrorCode.SEARCH_INDEX_NOT_READY,
+      });
     });
 
     it('maps ConnectionError to 503 SEARCH_UNAVAILABLE', async () => {
       mockEsClient.search.mockRejectedValueOnce(
         new errors.ConnectionError(
           'Elasticsearch unreachable',
-          {} as unknown as ConstructorParameters<
-            typeof errors.ConnectionError
-          >[1],
+          {} as unknown as ConstructorParameters<typeof errors.ConnectionError>[1],
         ),
       );
 
-      await expect(service.suggest({ prefix: 'iphone' })).rejects.toMatchObject(
-        {
-          code: SearchErrorCode.SEARCH_UNAVAILABLE,
-          errorCode: SearchErrorCode.SEARCH_UNAVAILABLE,
-        },
-      );
+      await expect(service.suggest({ prefix: 'iphone' })).rejects.toMatchObject({
+        errorCode: SearchErrorCode.SEARCH_UNAVAILABLE,
+      });
     });
   });
 });
