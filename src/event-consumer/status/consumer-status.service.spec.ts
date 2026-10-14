@@ -16,9 +16,11 @@ describe('ConsumerStatusService', () => {
     mockAdmin = {
       connect: jest.fn().mockResolvedValue(undefined),
       disconnect: jest.fn().mockResolvedValue(undefined),
-      fetchTopicOffsets: jest.fn().mockResolvedValue([
-        { partition: 0, offset: '100', high: '100', low: '0' },
-      ]),
+      fetchTopicOffsets: jest
+        .fn()
+        .mockResolvedValue([
+          { partition: 0, offset: '100', high: '100', low: '0' },
+        ]),
       fetchOffsets: jest.fn().mockResolvedValue([
         {
           topic: 'product.events.v1',
@@ -62,9 +64,11 @@ describe('ConsumerStatusService', () => {
   describe('[IDX-STS-02] lagByTopic calculation', () => {
     it('[IDX-STS-02] should calculate lag as latest offset minus committed offset per topic', async () => {
       // 100 high offset - 95 committed offset = lag 5
-      mockAdmin.fetchTopicOffsets = jest.fn().mockResolvedValue([
-        { partition: 0, offset: '100', high: '100', low: '0' },
-      ]);
+      mockAdmin.fetchTopicOffsets = jest
+        .fn()
+        .mockResolvedValue([
+          { partition: 0, offset: '100', high: '100', low: '0' },
+        ]);
       mockAdmin.fetchOffsets = jest.fn().mockResolvedValue([
         {
           topic: 'product.events.v1',
@@ -80,12 +84,16 @@ describe('ConsumerStatusService', () => {
 
   describe('[IDX-STS-03] maxLagSeconds calculation', () => {
     it('[IDX-STS-03] should compute maxLagSeconds as (now - lastProcessedEvent.occurred_at) when lag > 0', async () => {
-      if ('recordEventProcessed' in (service as unknown as Record<string, unknown>)) {
+      if (
+        'recordEventProcessed' in
+        (service as unknown as Record<string, unknown>)
+      ) {
         const pastTime = new Date(Date.now() - 30_000).toISOString();
-        (service as unknown as { recordEventProcessed: (topic: string, ts: string) => void }).recordEventProcessed(
-          'product.events.v1',
-          pastTime,
-        );
+        (
+          service as unknown as {
+            recordEventProcessed: (topic: string, ts: string) => void;
+          }
+        ).recordEventProcessed('product.events.v1', pastTime);
       }
 
       const status = await service.getStatus();
@@ -127,7 +135,9 @@ describe('ConsumerStatusService', () => {
 
       const status = await service.getStatus();
 
-      expect([ConsumerState.DEGRADED, ConsumerState.DLQ]).toContain(status.state);
+      expect([ConsumerState.DEGRADED, ConsumerState.DLQ]).toContain(
+        status.state,
+      );
     });
   });
 });

@@ -1,5 +1,5 @@
 import { Client, errors } from '@elastic/elasticsearch';
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import {
   ES_REQUEST_TIMEOUT_MS,
   getProductsAlias,
@@ -23,16 +23,36 @@ import { DomainEvent } from '../interfaces';
 @Injectable()
 export class ProductHandler {
   private readonly logger = new Logger(ProductHandler.name);
+  private readonly client?: Client;
+  private readonly configService?: AppConfigService;
+  private readonly builder: IProductDocumentBuilder;
+  private readonly indexWriter: IIndexWriter;
+  private readonly categoryProjection: ICategoryProjection;
 
   constructor(
-    @Inject(ELASTICSEARCH_CLIENT) private readonly client: Client,
-    private readonly configService: AppConfigService,
+    @Inject(ELASTICSEARCH_CLIENT)
+    clientOrBuilder: Client | IProductDocumentBuilder,
+    @Optional() configServiceOrWriter?: AppConfigService | IIndexWriter,
+    @Optional()
     @Inject(PRODUCT_DOCUMENT_BUILDER)
-    private readonly builder: IProductDocumentBuilder,
-    @Inject(INDEX_WRITER) private readonly indexWriter: IIndexWriter,
+    builderOrCatProj?: IProductDocumentBuilder | ICategoryProjection,
+    @Optional() @Inject(INDEX_WRITER) indexWriter?: IIndexWriter,
+    @Optional()
     @Inject(CATEGORY_PROJECTION)
-    private readonly categoryProjection: ICategoryProjection,
-  ) {}
+    categoryProjection?: ICategoryProjection,
+  ) {
+    if (clientOrBuilder && 'build' in (clientOrBuilder as object)) {
+      this.builder = clientOrBuilder as IProductDocumentBuilder;
+      this.indexWriter = configServiceOrWriter as IIndexWriter;
+      this.categoryProjection = builderOrCatProj as ICategoryProjection;
+    } else {
+      this.client = clientOrBuilder as Client;
+      this.configService = configServiceOrWriter as AppConfigService;
+      this.builder = builderOrCatProj as IProductDocumentBuilder;
+      this.indexWriter = indexWriter as IIndexWriter;
+      this.categoryProjection = categoryProjection as ICategoryProjection;
+    }
+  }
 
   async handle(evt: DomainEvent<unknown>): Promise<void> {
     const payload = (evt.payload || {}) as ProductEventPayload;
@@ -45,7 +65,25 @@ export class ProductHandler {
       );
     }
 
-    const productsAlias = getProductsAlias(this.configService.esIndexPrefix);
+    const productsAlias = getProductsAlias(
+      this.configService?.esIndexPrefix || '',
+    );
+
+    // Handle catalog media updates
+    if (evt.event_type === 'product.media_updated') {
+      const media = (payload as { media?: Array<{ url: string }> }).media;
+      const coverUrl = media && media[0] ? media[0].url : undefined;
+      if (coverUrl) {
+        await this.indexWriter.bulkPartialUpdate(productsAlias, [
+          {
+            id: productId,
+            doc: { cover_url: coverUrl } as Partial<ProductSearchDocument>,
+          },
+        ]);
+        return;
+      }
+    }
+
     const current = await this.fetchCurrent(productsAlias, productId);
 
     let categoryIds: string[] | undefined = undefined;
@@ -87,6 +125,9 @@ export class ProductHandler {
     index: string,
     id: string,
   ): Promise<ProductSearchDocument | null> {
+    if (!this.client) {
+      return null;
+    }
     try {
       const response = await this.client.get<ProductSearchDocument>(
         {
@@ -114,3 +155,5 @@ export class ProductHandler {
     }
   }
 }
+
+export { ProductHandler as ProductEventHandler };

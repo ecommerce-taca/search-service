@@ -1,11 +1,9 @@
 import { Client } from '@elastic/elasticsearch';
-import { Admin, Consumer, Kafka, Producer } from 'kafkajs';
+import { Admin, Kafka, Producer } from 'kafkajs';
 import {
-  BASE_INDEXES,
   ES_REQUEST_TIMEOUT_MS,
   getConsumerStateIndex,
   getKafkaTopic,
-  getPrefixedIndexName,
   getProductsAlias,
   getSearchCategoriesIndex,
   getVersionedIndexName,
@@ -383,7 +381,9 @@ describe('Indexing Module (Integration on real ES + Kafka cluster)', () => {
             id: 'prod-002-hidden',
           });
           const source = res._source as { visibility_status?: string };
-          return res.found && source?.visibility_status === VisibilityStatus.HIDDEN;
+          return (
+            res.found && source?.visibility_status === VisibilityStatus.HIDDEN
+          );
         } catch {
           return false;
         }
@@ -395,9 +395,9 @@ describe('Indexing Module (Integration on real ES + Kafka cluster)', () => {
       });
 
       expect(doc.found).toBe(true);
-      expect((doc._source as { visibility_status: string }).visibility_status).toBe(
-        VisibilityStatus.HIDDEN,
-      );
+      expect(
+        (doc._source as { visibility_status: string }).visibility_status,
+      ).toBe(VisibilityStatus.HIDDEN);
     });
   });
 
@@ -436,7 +436,9 @@ describe('Indexing Module (Integration on real ES + Kafka cluster)', () => {
             id: 'prod-003-deleted',
           });
           const source = res._source as { visibility_status?: string };
-          return res.found && source?.visibility_status === VisibilityStatus.DELETED;
+          return (
+            res.found && source?.visibility_status === VisibilityStatus.DELETED
+          );
         } catch {
           return false;
         }
@@ -448,16 +450,21 @@ describe('Indexing Module (Integration on real ES + Kafka cluster)', () => {
       });
 
       expect(doc.found).toBe(true);
-      expect((doc._source as { visibility_status: string }).visibility_status).toBe(
-        VisibilityStatus.DELETED,
-      );
+      expect(
+        (doc._source as { visibility_status: string }).visibility_status,
+      ).toBe(VisibilityStatus.DELETED);
     });
   });
 
   describe('[IDX-INT-05] Rating event updates', () => {
     it('[IDX-INT-05] should process rating.aggregate.updated and patch rating_avg / rating_count on product', async () => {
-      const ratingTopic = getKafkaTopic(KAFKA_TOPICS.RATING_EVENTS, kafkaPrefix);
-      const ratingEvt = ratingsFixture.find((e) => e.event_id === '01912f70-rat-001');
+      const ratingTopic = getKafkaTopic(
+        KAFKA_TOPICS.RATING_EVENTS,
+        kafkaPrefix,
+      );
+      const ratingEvt = ratingsFixture.find(
+        (e) => e.event_id === '01912f70-rat-001',
+      );
 
       if (ratingEvt) {
         await kafkaProducer.send({

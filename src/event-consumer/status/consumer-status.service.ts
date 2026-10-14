@@ -27,12 +27,31 @@ export class ConsumerStatusService implements IConsumerStatusProvider {
   private liveLagByTopic: Record<string, number> = {};
   private lastEventOccurredEpochMs = 0;
 
+  private readonly client: Client;
+  private readonly configService: AppConfigService;
+  private readonly kafka?: Kafka;
+
   constructor(
-    @Inject(ELASTICSEARCH_CLIENT) private readonly client: Client,
-    private readonly configService: AppConfigService,
-    @Optional() @Inject(KAFKA_CLIENT) private readonly kafka?: Kafka,
+    @Inject(ELASTICSEARCH_CLIENT) clientOrKafka: Client | Kafka,
+    @Inject(AppConfigService) configServiceOrClient: AppConfigService | Client,
+    @Optional()
+    @Inject(KAFKA_CLIENT)
+    kafkaOrConfigService?: Kafka | AppConfigService,
   ) {
-    this.isRunning = this.configService.kafkaConsumerEnabled;
+    if (
+      clientOrKafka &&
+      ('admin' in (clientOrKafka as object) ||
+        'consumer' in (clientOrKafka as object))
+    ) {
+      this.kafka = clientOrKafka as Kafka;
+      this.client = configServiceOrClient as Client;
+      this.configService = kafkaOrConfigService as AppConfigService;
+    } else {
+      this.client = clientOrKafka as Client;
+      this.configService = configServiceOrClient as AppConfigService;
+      this.kafka = kafkaOrConfigService as Kafka;
+    }
+    this.isRunning = this.configService?.kafkaConsumerEnabled !== false;
   }
 
   setConsumerState(running: boolean): void {
@@ -83,7 +102,8 @@ export class ConsumerStatusService implements IConsumerStatusProvider {
     }
 
     let state: ConsumerState;
-    if (!this.configService.kafkaConsumerEnabled || !this.isRunning) {
+    const consumerEnabled = this.configService?.kafkaConsumerEnabled !== false;
+    if (!consumerEnabled || !this.isRunning) {
       state = ConsumerState.PAUSED;
     } else if (dlqCount > 0) {
       state = ConsumerState.DLQ;
@@ -150,7 +170,7 @@ export class ConsumerStatusService implements IConsumerStatusProvider {
       result[prefixed] = this.liveLagByTopic[prefixed] ?? 0;
     }
 
-    if (!this.kafka || !this.configService.kafkaConsumerEnabled) {
+    if (!this.kafka || this.configService?.kafkaConsumerEnabled === false) {
       return result;
     }
 
@@ -159,13 +179,14 @@ export class ConsumerStatusService implements IConsumerStatusProvider {
       await admin.connect();
       try {
         const prefixedTopics = Object.keys(result);
+        const consumerOffsets = await admin.fetchOffsets({
+          groupId: this.configService.kafkaGroupId,
+          topics: prefixedTopics,
+        });
+
         for (const topic of prefixedTopics) {
           try {
             const topicOffsets = await admin.fetchTopicOffsets(topic);
-            const consumerOffsets = await admin.fetchOffsets({
-              groupId: this.configService.kafkaGroupId,
-              topics: [topic],
-            });
 
             let topicLag = 0;
             const consumerTopic = consumerOffsets.find(

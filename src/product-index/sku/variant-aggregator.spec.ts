@@ -238,7 +238,7 @@ describe('VariantAggregator', () => {
           'space key': 'bad2',
           'key!@#': 'bad3',
           '': 'bad4',
-          'a'.repeat(65): 'too_long',
+          ['a'.repeat(65)]: 'too_long',
         },
         version: 1,
       };

@@ -29,6 +29,76 @@ export class VariantAggregator {
   private readonly logger = new Logger(VariantAggregator.name);
 
   /**
+   * Aggregates variant state from a SKU event and existing product document.
+   */
+  aggregate(
+    existingDoc: {
+      variant_skus?: Record<string, VariantSkuEntry>;
+      attributes?: Record<string, string[]>;
+      attribute_pairs?: string[];
+    } | null,
+    skuEvent:
+      | SkuEventPayload
+      | DomainEvent<unknown>
+      | {
+          sku_id: string;
+          product_id?: string;
+          status: string;
+          attributes?: Record<string, string>;
+          version?: number;
+        },
+  ): AggregatedVariantState {
+    const payload = (
+      'payload' in skuEvent && skuEvent.payload ? skuEvent.payload : skuEvent
+    ) as SkuEventPayload;
+    const skuId =
+      payload.sku_id ||
+      ('aggregate_id' in skuEvent
+        ? (skuEvent as DomainEvent<unknown>).aggregate_id
+        : '');
+    const version =
+      typeof payload.version === 'number'
+        ? payload.version
+        : 'version' in skuEvent
+          ? (skuEvent as DomainEvent<unknown>).version
+          : 1;
+
+    const syntheticEvt: DomainEvent<unknown> = {
+      event_id:
+        ('event_id' in skuEvent
+          ? (skuEvent as DomainEvent<unknown>).event_id
+          : '') || 'synthetic-event',
+      schema_version: 1,
+      event_type: 'sku.updated',
+      occurred_at:
+        ('occurred_at' in skuEvent
+          ? (skuEvent as DomainEvent<unknown>).occurred_at
+          : '') || new Date().toISOString(),
+      aggregate_type: 'SKU',
+      aggregate_id: skuId,
+      version: version ?? 1,
+      payload: {
+        ...payload,
+        sku_id: skuId,
+        version: version ?? 1,
+      },
+    };
+
+    const res = this.handleSkuEvent(
+      existingDoc as ProductSearchDocument | null,
+      syntheticEvt,
+    );
+
+    return (
+      res || {
+        variant_skus: existingDoc?.variant_skus || {},
+        attributes: existingDoc?.attributes || {},
+        attribute_pairs: existingDoc?.attribute_pairs || [],
+      }
+    );
+  }
+
+  /**
    * Applies an incoming SKU event against the current document's variant_skus.
    * Returns the updated state ({ variant_skus, attributes, attribute_pairs }) or null if the event should be skipped (e.g. older version).
    */
@@ -129,7 +199,9 @@ export class VariantAggregator {
 
     const sortedKeys = Object.keys(aggregatedValues).sort();
     for (const key of sortedKeys) {
-      const values = Array.from(aggregatedValues[key]).sort();
+      const values = Array.from(aggregatedValues[key]).sort((a, b) =>
+        a.localeCompare(b, 'vi'),
+      );
       if (values.length > 0) {
         attributes[key] = values;
         for (const val of values) {
@@ -138,7 +210,9 @@ export class VariantAggregator {
       }
     }
 
-    const attribute_pairs = Array.from(attributePairsSet).sort();
+    const attribute_pairs = Array.from(attributePairsSet).sort((a, b) =>
+      a.localeCompare(b, 'vi'),
+    );
 
     return {
       attributes,

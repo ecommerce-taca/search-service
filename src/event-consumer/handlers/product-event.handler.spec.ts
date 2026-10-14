@@ -82,11 +82,12 @@ describe('ProductEventHandler', () => {
 
       await handler.handle(event);
 
-      expect(mockCategoryProjection.resolvePathIds).toHaveBeenCalledWith('cat-leaf');
-      expect(mockWriter.bulkUpsert).toHaveBeenCalledWith(
-        expect.any(String),
-        [builtDoc],
+      expect(mockCategoryProjection.resolvePathIds).toHaveBeenCalledWith(
+        'cat-leaf',
       );
+      expect(mockWriter.bulkUpsert).toHaveBeenCalledWith(expect.any(String), [
+        builtDoc,
+      ]);
     });
   });
 

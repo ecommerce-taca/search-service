@@ -3,6 +3,7 @@ import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { Consumer, Kafka, Producer } from 'kafkajs';
 import { AppModule } from '../src/app.module';
+import { VisibilityStatus } from '../src/common/enums';
 import {
   CONSUMER_STATUS_PROVIDER,
   IConsumerStatusProvider,
@@ -22,7 +23,6 @@ describe('Indexing Module (e2e - no cluster required)', () => {
   let mockKafka: jest.Mocked<Partial<Kafka>>;
   let mockConsumer: jest.Mocked<Partial<Consumer>>;
   let mockProducer: jest.Mocked<Partial<Producer>>;
-  let eachBatchHandler: ((payload: unknown) => Promise<void>) | undefined;
 
   beforeAll(async () => {
     mockEsClient = {
@@ -31,7 +31,9 @@ describe('Indexing Module (e2e - no cluster required)', () => {
       update: jest.fn().mockResolvedValue({ result: 'updated' }),
       get: jest.fn().mockResolvedValue({ found: false }),
       mget: jest.fn().mockResolvedValue({ docs: [] }),
-      search: jest.fn().mockResolvedValue({ hits: { hits: [], total: { value: 0 } } }),
+      search: jest
+        .fn()
+        .mockResolvedValue({ hits: { hits: [], total: { value: 0 } } }),
       count: jest.fn().mockResolvedValue({ count: 0 }),
       close: jest.fn().mockResolvedValue(undefined),
       indices: {
@@ -45,9 +47,7 @@ describe('Indexing Module (e2e - no cluster required)', () => {
       connect: jest.fn().mockResolvedValue(undefined),
       disconnect: jest.fn().mockResolvedValue(undefined),
       subscribe: jest.fn().mockResolvedValue(undefined),
-      run: jest.fn().mockImplementation(async (options) => {
-        eachBatchHandler = options?.eachBatch;
-      }),
+      run: jest.fn().mockResolvedValue(undefined),
       stop: jest.fn().mockResolvedValue(undefined),
     };
 
@@ -156,7 +156,7 @@ describe('Indexing Module (e2e - no cluster required)', () => {
         attributes: {},
         spec_attributes: {},
         attribute_pairs: [],
-        visibility_status: 'PUBLISHED' as const,
+        visibility_status: VisibilityStatus.PUBLISHED,
         source_version: 1,
         source_event_id: 'evt-e2e-1',
         indexed_at: '2026-10-14T10:00:00Z',

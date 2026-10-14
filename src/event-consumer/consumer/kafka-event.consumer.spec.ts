@@ -3,8 +3,8 @@ import { Consumer, Kafka, Producer } from 'kafkajs';
 import {
   EVENT_RETRY_BACKOFF_MS,
   EVENT_RETRY_COUNT,
-  KAFKA_TOPICS,
 } from '../../common/constants';
+import { RequestContext } from '../../common/context/request-context';
 import { AppConfigService } from '../../config/config.service';
 import { KafkaEventConsumer } from './kafka-event.consumer';
 
@@ -14,7 +14,9 @@ describe('KafkaEventConsumer', () => {
   let mockConsumer: jest.Mocked<Partial<Consumer>>;
   let mockProducer: jest.Mocked<Partial<Producer>>;
   let mockClient: jest.Mocked<Partial<Client>>;
-  let mockConfigService: jest.Mocked<Partial<AppConfigService>>;
+  let mockConfigService: jest.Mocked<Partial<AppConfigService>> & {
+    kafkaConsumerEnabled?: boolean;
+  };
 
   beforeEach(() => {
     mockConsumer = {
@@ -186,7 +188,9 @@ describe('KafkaEventConsumer', () => {
       };
 
       const headers = {
-        traceparent: Buffer.from('00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01'),
+        traceparent: Buffer.from(
+          '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01',
+        ),
         'x-request-id': Buffer.from('req-12345'),
       };
 
@@ -230,18 +234,22 @@ describe('KafkaEventConsumer', () => {
       };
 
       const headers = {
-        traceparent: Buffer.from('00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01'),
+        traceparent: Buffer.from(
+          '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01',
+        ),
       };
 
       let capturedTraceId: string | undefined;
       const handler = jest.fn().mockImplementation(() => {
         // Here we test that trace context is active
+        capturedTraceId = RequestContext.getTraceId();
         return Promise.resolve({ status: 'PROCESSED' });
       });
 
       await consumerService.processWithRetry(event, headers, handler);
 
       expect(handler).toHaveBeenCalled();
+      expect(capturedTraceId).toBe('4bf92f3577b34da6a3ce929d0e0e4736');
     });
   });
 });

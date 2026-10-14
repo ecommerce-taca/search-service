@@ -139,25 +139,27 @@ describe('CategoryProjectionWriter', () => {
       });
 
       // Products search returns 2 hits
-      (mockClient.search as jest.Mock).mockResolvedValueOnce({
-        hits: {
-          hits: [
-            {
-              _id: 'prod-1',
-              _source: {
-                product_id: 'prod-1',
-                category_ids: ['cat-root', 'cat-phones', 'cat-leaf'],
-                primary_category_id: 'cat-leaf',
+      (mockClient.search as jest.Mock)
+        .mockResolvedValueOnce({
+          hits: {
+            hits: [
+              {
+                _id: 'prod-1',
+                _source: {
+                  product_id: 'prod-1',
+                  category_ids: ['cat-root', 'cat-phones', 'cat-leaf'],
+                  primary_category_id: 'cat-leaf',
+                },
+                sort: ['prod-1'],
               },
-              sort: ['prod-1'],
-            },
-          ],
-        },
-      }).mockResolvedValueOnce({
-        hits: {
-          hits: [], // end of search_after
-        },
-      });
+            ],
+          },
+        })
+        .mockResolvedValueOnce({
+          hits: {
+            hits: [], // end of search_after
+          },
+        });
 
       const pathChangeEvent = {
         category_id: 'cat-phones',

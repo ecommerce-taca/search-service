@@ -184,10 +184,11 @@ export class ProductDocumentBuilder implements IProductDocumentBuilder {
       !evt.event_type ||
       typeof evt.version !== 'number' ||
       isNaN(evt.version) ||
+      evt.version < 1 ||
+      !evt.payload ||
+      typeof evt.payload !== 'object' ||
       (!evt.aggregate_id &&
-        (!evt.payload ||
-          typeof evt.payload !== 'object' ||
-          !(evt.payload as Record<string, unknown>).product_id))
+        !(evt.payload as Record<string, unknown>).product_id)
     ) {
       throw new SearchException(
         SearchErrorCode.SEARCH_EVENT_INVALID,
@@ -202,40 +203,38 @@ export class ProductDocumentBuilder implements IProductDocumentBuilder {
     current: ProductSearchDocument | null,
     context?: BuildContext,
   ): DocumentChange {
+    if (current) {
+      return this.buildProductUpdated(evt, payload, current, context);
+    }
     const productId = evt.aggregate_id || payload.product_id || '';
-    const title = payload.title || current?.title || '';
-    const brand = payload.brand || current?.brand || '';
+    const title = payload.title || '';
+    const brand = payload.brand || '';
 
     const price = this.extractPrice(payload.price);
     const currency = this.extractCurrency(payload.price, payload.currency);
 
-    const categoryIds =
-      context?.categoryIds ||
-      payload.category_ids ||
-      current?.category_ids ||
-      [];
+    const categoryIds = context?.categoryIds || payload.category_ids || [];
 
     const doc: ProductSearchDocument = {
       product_id: productId,
-      shop_id:
-        payload.shop_id || payload.shop?.shop_id || current?.shop_id || '',
-      slug: payload.slug || current?.slug || '',
+      shop_id: payload.shop_id || payload.shop?.shop_id || '',
+      slug: payload.slug || '',
       title,
       title_exact: title,
-      description: payload.description || current?.description || '',
+      description: payload.description || '',
       category_ids: categoryIds,
-      category_path: payload.category_path || current?.category_path || [],
+      category_path: payload.category_path || [],
       brand,
       price,
       currency,
-      rating_avg: current?.rating_avg ?? 0,
-      rating_count: current?.rating_count ?? 0,
-      attributes: current?.attributes ?? {},
+      rating_avg: 0,
+      rating_count: 0,
+      attributes: {},
       spec_attributes: payload.attributes
         ? this.normalizeSpecAttributes(payload.attributes)
-        : current?.spec_attributes,
-      attribute_pairs: current?.attribute_pairs ?? [],
-      variant_skus: current?.variant_skus ?? {},
+        : undefined,
+      attribute_pairs: [],
+      variant_skus: {},
       suggest: {
         input: [title, brand].filter((item): item is string => Boolean(item)),
       },
@@ -244,15 +243,10 @@ export class ProductDocumentBuilder implements IProductDocumentBuilder {
       source_event_id: evt.event_id,
       indexed_at: evt.occurred_at || new Date().toISOString(),
       created_at:
-        payload.created_at ||
-        current?.created_at ||
-        evt.occurred_at ||
-        new Date().toISOString(),
-      cover_url:
-        payload.media?.[0]?.url || payload.cover_url || current?.cover_url,
+        payload.created_at || evt.occurred_at || new Date().toISOString(),
+      cover_url: payload.media?.[0]?.url || payload.cover_url,
       shop:
         payload.shop ||
-        current?.shop ||
         (payload.shop_id ? { shop_id: payload.shop_id, name: '' } : undefined),
     };
 
@@ -359,8 +353,8 @@ export class ProductDocumentBuilder implements IProductDocumentBuilder {
       [];
 
     const shop =
-      current?.shop ||
       payload.shop ||
+      current?.shop ||
       (payload.shop_id
         ? { shop_id: payload.shop_id, name: '' }
         : current?.shop_id

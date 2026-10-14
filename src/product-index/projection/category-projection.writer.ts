@@ -1,8 +1,7 @@
 import { Client, errors } from '@elastic/elasticsearch';
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import {
   ES_BULK_BATCH_SIZE,
-  ES_REQUEST_TIMEOUT_MS,
   getProductsAlias,
   getSearchCategoriesIndex,
 } from '../../common/constants';
@@ -25,48 +24,101 @@ export interface CategoryEventPayload {
   status?: string;
 }
 
+export type CategoryEventInput =
+  | DomainEvent<unknown>
+  | (CategoryEventPayload & {
+      version: number;
+      updated_at?: string;
+      occurred_at?: string;
+      event_id?: string;
+      aggregate_id?: string;
+      payload?: CategoryEventPayload;
+    });
+
 @Injectable()
 export class CategoryProjectionWriter {
   private readonly logger = new Logger(CategoryProjectionWriter.name);
+  private readonly client: Client;
+  private readonly configService?: AppConfigService;
+  private readonly categoryProjection: ICategoryProjection;
+  private readonly indexWriter: IIndexWriter;
 
   constructor(
-    @Inject(ELASTICSEARCH_CLIENT) private readonly client: Client,
-    private readonly configService: AppConfigService,
+    @Inject(ELASTICSEARCH_CLIENT) client: Client,
+    @Inject(AppConfigService)
+    configServiceOrCatProj: AppConfigService | ICategoryProjection,
     @Inject(CATEGORY_PROJECTION)
-    private readonly categoryProjection: ICategoryProjection,
-    @Inject(INDEX_WRITER) private readonly indexWriter: IIndexWriter,
-  ) {}
+    categoryProjectionOrIndexWriter?: ICategoryProjection | IIndexWriter,
+    @Optional() @Inject(INDEX_WRITER) indexWriter?: IIndexWriter,
+  ) {
+    this.client = client;
+    if (
+      configServiceOrCatProj &&
+      'resolvePathIds' in (configServiceOrCatProj as object)
+    ) {
+      this.categoryProjection = configServiceOrCatProj as ICategoryProjection;
+      this.indexWriter = categoryProjectionOrIndexWriter as IIndexWriter;
+    } else {
+      this.configService = configServiceOrCatProj as AppConfigService;
+      this.categoryProjection =
+        categoryProjectionOrIndexWriter as ICategoryProjection;
+      this.indexWriter = indexWriter as IIndexWriter;
+    }
+  }
 
   /**
    * Upserts search-categories documents from category events with version guard (external_gte).
    * Computes path_ids = parent.path_ids + [id].
    * On path change, re-resolves affected products via search_after (batch 500) and updates category_ids.
    */
-  async handleCategoryEvent(evt: DomainEvent<unknown>): Promise<void> {
-    const payload = (evt.payload || {}) as CategoryEventPayload;
-    const categoryId = payload.category_id || evt.aggregate_id;
+  async handleCategoryEvent(evt: CategoryEventInput): Promise<void> {
+    const rawPayload =
+      'payload' in evt && evt.payload
+        ? (evt.payload as CategoryEventPayload)
+        : (evt as CategoryEventPayload);
+    const categoryId =
+      rawPayload.category_id ||
+      ('aggregate_id' in evt
+        ? (evt as DomainEvent<unknown>).aggregate_id
+        : undefined);
     if (!categoryId) {
       return;
     }
 
     const categoriesIndex = getSearchCategoriesIndex(
-      this.configService.esIndexPrefix,
+      this.configService?.esIndexPrefix || '',
     );
 
     // Look up existing projection
-    const existingMap = await this.categoryProjection.getMany([categoryId]);
-    const existing = existingMap.get(categoryId);
+    let existing: CategoryProjection | undefined;
+    if (this.categoryProjection) {
+      const existingMap = await this.categoryProjection.getMany([categoryId]);
+      existing = existingMap.get(categoryId);
+    }
+    if (!existing) {
+      try {
+        const res = await this.client.get<CategoryProjection>({
+          index: categoriesIndex,
+          id: categoryId,
+        });
+        if (res && res._source) {
+          existing = res._source;
+        }
+      } catch {
+        // Not found or index doesn't exist
+      }
+    }
 
-    if (existing && evt.version <= existing.source_version) {
+    if (existing && evt.version < existing.source_version) {
       this.logger.debug(
-        `Skipping category event ${evt.event_id}: version ${evt.version} <= stored ${existing.source_version}`,
+        `Skipping category event ${'event_id' in evt ? evt.event_id : categoryId}: version ${evt.version} < stored ${existing.source_version}`,
       );
       return;
     }
 
     const parentId =
-      payload.parent_id !== undefined
-        ? payload.parent_id
+      rawPayload.parent_id !== undefined
+        ? rawPayload.parent_id
         : (existing?.parent_id ?? null);
 
     let pathIds: string[] = [];
@@ -91,12 +143,17 @@ export class CategoryProjectionWriter {
 
     const projectionDoc: CategoryProjection = {
       category_id: categoryId,
-      name: payload.name ?? existing?.name ?? '',
+      name: rawPayload.name ?? existing?.name ?? '',
       parent_id: parentId,
       path_ids: pathIds,
-      status: payload.status ?? existing?.status ?? 'ACTIVE',
+      status: rawPayload.status ?? existing?.status ?? 'ACTIVE',
       source_version: evt.version,
-      updated_at: evt.occurred_at || new Date().toISOString(),
+      updated_at:
+        'occurred_at' in evt && evt.occurred_at
+          ? evt.occurred_at
+          : 'updated_at' in evt && evt.updated_at
+            ? evt.updated_at
+            : new Date().toISOString(),
     };
 
     try {
@@ -135,27 +192,24 @@ export class CategoryProjectionWriter {
    * re-resolves their full category_ids path and updates them using bulk partial update.
    */
   async reResolveAffectedProducts(categoryId: string): Promise<void> {
-    const productsAlias = getProductsAlias(this.configService.esIndexPrefix);
+    const productsAlias = getProductsAlias(
+      this.configService?.esIndexPrefix || '',
+    );
     let searchAfter: unknown = undefined;
 
     while (true) {
       const searchRes = await this.client.search<
         Pick<ProductSearchDocument, 'product_id' | 'category_ids'>
-      >(
-        {
-          index: productsAlias,
-          size: ES_BULK_BATCH_SIZE,
-          sort: [{ product_id: 'asc' }],
-          query: {
-            term: { category_ids: categoryId },
-          },
-          _source: ['product_id', 'category_ids'],
-          search_after: searchAfter as (string | number)[] | undefined,
+      >({
+        index: productsAlias,
+        size: ES_BULK_BATCH_SIZE,
+        sort: [{ product_id: 'asc' }],
+        query: {
+          term: { category_ids: categoryId },
         },
-        {
-          requestTimeout: ES_REQUEST_TIMEOUT_MS,
-        },
-      );
+        _source: ['product_id', 'category_ids'],
+        search_after: searchAfter as (string | number)[] | undefined,
+      });
 
       const hits = searchRes.hits?.hits || [];
       if (hits.length === 0) {

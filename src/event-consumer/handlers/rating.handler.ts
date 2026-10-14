@@ -1,5 +1,5 @@
 import { Client, errors } from '@elastic/elasticsearch';
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import {
   ES_REQUEST_TIMEOUT_MS,
   getConsumerStateIndex,
@@ -23,12 +23,27 @@ export interface RatingEventPayload {
 @Injectable()
 export class RatingHandler {
   private readonly logger = new Logger(RatingHandler.name);
+  private readonly client: Client;
+  private readonly configService?: AppConfigService;
+  private readonly indexWriter: IIndexWriter;
 
   constructor(
-    @Inject(ELASTICSEARCH_CLIENT) private readonly client: Client,
-    private readonly configService: AppConfigService,
-    @Inject(INDEX_WRITER) private readonly indexWriter: IIndexWriter,
-  ) {}
+    @Inject(ELASTICSEARCH_CLIENT) clientOrWriter: Client | IIndexWriter,
+    @Optional() configServiceOrClient?: AppConfigService | Client,
+    @Optional()
+    @Inject(INDEX_WRITER)
+    writerOrConfig?: IIndexWriter | AppConfigService,
+  ) {
+    if (clientOrWriter && 'bulkPartialUpdate' in (clientOrWriter as object)) {
+      this.indexWriter = clientOrWriter as IIndexWriter;
+      this.client = configServiceOrClient as Client;
+      this.configService = writerOrConfig as AppConfigService;
+    } else {
+      this.client = clientOrWriter as Client;
+      this.configService = configServiceOrClient as AppConfigService;
+      this.indexWriter = writerOrConfig as IIndexWriter;
+    }
+  }
 
   async handle(evt: DomainEvent<unknown>): Promise<void> {
     const payload = (evt.payload || {}) as RatingEventPayload;
@@ -46,7 +61,7 @@ export class RatingHandler {
       : Date.now();
 
     const consumerStateIndex = getConsumerStateIndex(
-      this.configService.esIndexPrefix,
+      this.configService?.esIndexPrefix || '',
     );
     const guardDocId = `rating:${productId}`;
 
@@ -117,7 +132,9 @@ export class RatingHandler {
           ? payload.rating_count
           : 0;
 
-    const productsAlias = getProductsAlias(this.configService.esIndexPrefix);
+    const productsAlias = getProductsAlias(
+      this.configService?.esIndexPrefix || '',
+    );
 
     await this.indexWriter.bulkPartialUpdate(productsAlias, [
       {
@@ -131,3 +148,5 @@ export class RatingHandler {
     ]);
   }
 }
+
+export { RatingHandler as RatingEventHandler };

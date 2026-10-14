@@ -464,7 +464,7 @@ describe('ProductDocumentBuilder', () => {
         builder.build(invalidEvent, baseProductDoc);
       } catch (err: unknown) {
         expect(err).toBeInstanceOf(SearchException);
-        expect((err as SearchException).errorCode).toBe(
+        expect((err as SearchException).code).toBe(
           SearchErrorCode.SEARCH_EVENT_INVALID,
         );
       }
@@ -499,8 +499,22 @@ describe('ProductDocumentBuilder', () => {
       const result = builder.build(event, baseProductDoc);
       expect(result.kind).toBe('UPSERT');
 
-      if ('withCategoryIds' in builder && typeof (builder as unknown as { withCategoryIds: (...args: unknown[]) => DocumentChange }).withCategoryIds === 'function') {
-        const enriched = (builder as unknown as { withCategoryIds: (c: DocumentChange, ids: string[]) => DocumentChange }).withCategoryIds(result, ['cat-root', 'cat-leaf']);
+      if (
+        'withCategoryIds' in builder &&
+        typeof (
+          builder as unknown as {
+            withCategoryIds: (...args: unknown[]) => DocumentChange;
+          }
+        ).withCategoryIds === 'function'
+      ) {
+        const enriched = (
+          builder as unknown as {
+            withCategoryIds: (
+              c: DocumentChange,
+              ids: string[],
+            ) => DocumentChange;
+          }
+        ).withCategoryIds(result, ['cat-root', 'cat-leaf']);
         if (enriched.kind === 'UPSERT') {
           expect(enriched.doc.category_ids).toEqual(['cat-root', 'cat-leaf']);
         }

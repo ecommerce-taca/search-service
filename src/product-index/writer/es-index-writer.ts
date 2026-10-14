@@ -34,7 +34,12 @@ export class EsIndexWriter implements IIndexWriter {
     index: string,
     docs: ProductSearchDocument[],
   ): Promise<void> {
-    await this.bulkUpsertWithSummary(index, docs);
+    const summary = await this.bulkUpsertWithSummary(index, docs);
+    if (summary.failed > 0) {
+      throw new Error(
+        `Bulk upsert to ${index} had ${summary.failed} failed items`,
+      );
+    }
   }
 
   async bulkUpsertWithSummary(
@@ -61,6 +66,7 @@ export class EsIndexWriter implements IIndexWriter {
       ]);
 
       const response = await this.client.bulk({
+        index,
         operations,
         refresh: false,
       });
@@ -82,7 +88,12 @@ export class EsIndexWriter implements IIndexWriter {
     index: string,
     updates: Array<{ id: string; doc: Partial<ProductSearchDocument> }>,
   ): Promise<void> {
-    await this.bulkPartialUpdateWithSummary(index, updates);
+    const summary = await this.bulkPartialUpdateWithSummary(index, updates);
+    if (summary.failed > 0) {
+      throw new Error(
+        `Bulk partial update to ${index} had ${summary.failed} failed items`,
+      );
+    }
   }
 
   async bulkPartialUpdateWithSummary(
@@ -110,6 +121,7 @@ export class EsIndexWriter implements IIndexWriter {
       ]);
 
       const response = await this.client.bulk({
+        index,
         operations,
         refresh: false,
       });

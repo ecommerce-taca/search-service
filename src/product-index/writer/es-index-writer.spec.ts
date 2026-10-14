@@ -1,5 +1,4 @@
 import { Client } from '@elastic/elasticsearch';
-import { ES_BULK_BATCH_SIZE } from '../../common/constants';
 import { VisibilityStatus } from '../../common/enums';
 import { IIndexWriter, ProductSearchDocument } from '../interfaces';
 import { EsIndexWriter } from './es-index-writer';
@@ -25,7 +24,10 @@ describe('EsIndexWriter', () => {
     writer = new EsIndexWriter(mockClient as unknown as Client);
   });
 
-  const createDummyDoc = (id: string, version: number): ProductSearchDocument => ({
+  const createDummyDoc = (
+    id: string,
+    version: number,
+  ): ProductSearchDocument => ({
     product_id: id,
     shop_id: 'shop-001',
     slug: `slug-${id}`,
@@ -85,9 +87,12 @@ describe('EsIndexWriter', () => {
 
       expect(mockClient.bulk).toHaveBeenCalledTimes(3);
 
-      const firstCallOps = (mockClient.bulk as jest.Mock).mock.calls[0][0].operations;
-      const secondCallOps = (mockClient.bulk as jest.Mock).mock.calls[1][0].operations;
-      const thirdCallOps = (mockClient.bulk as jest.Mock).mock.calls[2][0].operations;
+      const firstCallOps = (mockClient.bulk as jest.Mock).mock.calls[0][0]
+        .operations;
+      const secondCallOps = (mockClient.bulk as jest.Mock).mock.calls[1][0]
+        .operations;
+      const thirdCallOps = (mockClient.bulk as jest.Mock).mock.calls[2][0]
+        .operations;
 
       // Each document takes 2 array items (action metadata + document body)
       expect(firstCallOps.length).toBe(500 * 2);
@@ -112,7 +117,8 @@ describe('EsIndexWriter', () => {
               status: 409,
               error: {
                 type: 'version_conflict_engine_exception',
-                reason: '[prod-conflict]: version conflict, current version [10] is higher or equal to provided [8]',
+                reason:
+                  '[prod-conflict]: version conflict, current version [10] is higher or equal to provided [8]',
               },
             },
           },
@@ -129,7 +135,9 @@ describe('EsIndexWriter', () => {
       const doc2 = createDummyDoc('prod-ok', 12);
 
       // Should complete without throwing exception
-      await expect(writer.bulkUpsert('products-v1', [doc1, doc2])).resolves.toBeUndefined();
+      await expect(
+        writer.bulkUpsert('products-v1', [doc1, doc2]),
+      ).resolves.toBeUndefined();
     });
   });
 
