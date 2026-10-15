@@ -71,26 +71,6 @@ describe('SuggestService (Integration on real ES cluster)', () => {
               node: mockConfigService.esNode,
               requestTimeout: ES_REQUEST_TIMEOUT_MS,
             });
-            const originalSearch = rawClient.search.bind(rawClient);
-            rawClient.search = ((
-              params: Parameters<typeof originalSearch>[0],
-              options?: Parameters<typeof originalSearch>[1],
-            ) => {
-              if (params && 'requestTimeout' in params) {
-                const { requestTimeout, ...restParams } = params as Record<
-                  string,
-                  unknown
-                >;
-                return originalSearch(
-                  restParams as Parameters<typeof originalSearch>[0],
-                  {
-                    requestTimeout: requestTimeout as number,
-                    ...options,
-                  },
-                );
-              }
-              return originalSearch(params, options);
-            }) as typeof rawClient.search;
             return rawClient;
           },
         },
