@@ -1,4 +1,5 @@
 import { Client } from '@elastic/elasticsearch';
+import { DocumentMissingError } from './document-missing.error';
 import { SearchException } from '../../common/errors';
 import { AppConfigService } from '../../config/config.service';
 import { IIndexWriter } from '../../product-index/interfaces';
@@ -59,13 +60,15 @@ describe('SkuHandler.handleSkusUpdated (catalog product.skus_updated)', () => {
     expect(updates[0].doc.attribute_pairs).toEqual(['color=Đen']);
   });
 
-  it('does nothing when the product is not indexed yet', async () => {
+  it('signals a missing document when the product is not indexed yet', async () => {
     get.mockRejectedValue(
       Object.assign(new Error('not found'), { statusCode: 404 }),
     );
     get.mockResolvedValue({ found: false });
 
-    await handler.handleSkusUpdated(event({ product_id: 'prod-1', skus: [] }));
+    await expect(
+      handler.handleSkusUpdated(event({ product_id: 'prod-1', skus: [] })),
+    ).rejects.toBeInstanceOf(DocumentMissingError);
     expect(writer.bulkPartialUpdate).not.toHaveBeenCalled();
   });
 

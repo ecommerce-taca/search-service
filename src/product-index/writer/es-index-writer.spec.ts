@@ -1,5 +1,6 @@
 import { Client } from '@elastic/elasticsearch';
 import { VisibilityStatus } from '../../common/enums';
+import { DocumentMissingError } from '../../event-consumer/handlers/document-missing.error';
 import { IIndexWriter, ProductSearchDocument } from '../interfaces';
 import { EsIndexWriter } from './es-index-writer';
 
@@ -207,6 +208,32 @@ describe('EsIndexWriter', () => {
       await writer.bulkPartialUpdate('products-v1', updates);
 
       expect(mockClient.bulk).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('[IDX-WRT-08] partial update on a missing document', () => {
+    it('[IDX-WRT-08] should raise DocumentMissingError instead of a generic failure', async () => {
+      (mockClient.bulk as jest.Mock).mockResolvedValue({
+        errors: true,
+        items: [
+          {
+            update: {
+              _id: 'p-missing',
+              status: 404,
+              error: {
+                type: 'document_missing_exception',
+                reason: '[p-missing]: document missing',
+              },
+            },
+          },
+        ],
+      });
+
+      await expect(
+        writer.bulkPartialUpdate('products-v1', [
+          { id: 'p-missing', doc: { cover_url: 'x' } },
+        ]),
+      ).rejects.toBeInstanceOf(DocumentMissingError);
     });
   });
 

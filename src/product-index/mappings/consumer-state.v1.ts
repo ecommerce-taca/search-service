@@ -9,5 +9,9 @@ export const CONSUMER_STATE_MAPPING_V1: MappingTypeMapping = {
     processed_at: { type: 'date' },
     status: { type: 'keyword' },
     error_code: { type: 'keyword' },
+    // Events parked until their product document exists (status PENDING).
+    topic: { type: 'keyword' },
+    occurred_at: { type: 'date' },
+    event: { type: 'object', enabled: false },
   },
 };

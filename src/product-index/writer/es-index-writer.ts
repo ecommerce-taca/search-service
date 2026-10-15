@@ -2,12 +2,15 @@ import { Client } from '@elastic/elasticsearch';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ES_BULK_BATCH_SIZE } from '../../common/constants';
 import { ELASTICSEARCH_CLIENT } from '../elasticsearch.module';
+import { DocumentMissingError } from '../../event-consumer/handlers/document-missing.error';
 import { IIndexWriter, ProductSearchDocument } from '../interfaces';
 
 export interface BulkOperationSummary {
   applied: number;
   skipped: number;
   failed: number;
+  /** Partial updates whose target document does not exist (yet). */
+  missing?: string[];
 }
 
 export interface BulkActionResponse {
@@ -89,6 +92,9 @@ export class EsIndexWriter implements IIndexWriter {
     updates: Array<{ id: string; doc: Partial<ProductSearchDocument> }>,
   ): Promise<void> {
     const summary = await this.bulkPartialUpdateWithSummary(index, updates);
+    if (summary.missing && summary.missing.length > 0) {
+      throw new DocumentMissingError(summary.missing[0]);
+    }
     if (summary.failed > 0) {
       throw new Error(
         `Bulk partial update to ${index} had ${summary.failed} failed items`,
@@ -189,6 +195,15 @@ export class EsIndexWriter implements IIndexWriter {
 
       const status = action.status as number;
       const error = action.error;
+
+      if (
+        status === 404 &&
+        (error?.type === 'document_missing_exception' || !error)
+      ) {
+        const id = (action as { _id?: string })._id;
+        (summary.missing ??= []).push(id ?? '');
+        continue;
+      }
 
       if (
         status === 409 ||

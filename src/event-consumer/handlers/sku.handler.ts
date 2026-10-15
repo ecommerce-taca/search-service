@@ -18,6 +18,7 @@ import {
   VariantAggregator,
 } from '../../product-index/sku/variant-aggregator';
 import { DomainEvent } from '../interfaces';
+import { DocumentMissingError } from './document-missing.error';
 
 @Injectable()
 export class SkuHandler {
@@ -46,10 +47,7 @@ export class SkuHandler {
     const current = await this.fetchCurrent(productsAlias, productId);
 
     if (!current) {
-      this.logger.warn(
-        `Product ${productId} not found when applying SKU event ${evt.event_id}`,
-      );
-      return;
+      throw new DocumentMissingError(productId);
     }
 
     const aggregated = this.variantAggregator.handleSkuEvent(current, evt);
@@ -90,10 +88,7 @@ export class SkuHandler {
     const productsAlias = getProductsAlias(this.configService.esIndexPrefix);
     const current = await this.fetchCurrent(productsAlias, productId);
     if (!current) {
-      this.logger.warn(
-        `Product ${productId} not found when applying SKU snapshot ${evt.event_id}`,
-      );
-      return;
+      throw new DocumentMissingError(productId);
     }
 
     const aggregated = this.variantAggregator.replaceAll(
