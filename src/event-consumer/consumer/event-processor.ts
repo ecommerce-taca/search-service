@@ -20,6 +20,7 @@ import { ELASTICSEARCH_CLIENT } from '../../product-index/elasticsearch.module';
 import {
   CatalogHandler,
   CategoryHandler,
+  DocumentMissingError,
   ProductHandler,
   RatingHandler,
   SkuHandler,
@@ -29,6 +30,7 @@ import { DlqPublisher } from './dlq-publisher';
 import { normalizeExtendedJson } from './extended-json';
 
 const SKUS_UPDATED_EVENT = 'product.skus_updated';
+const PARKED_REPLAY_LIMIT = 100;
 
 @Injectable()
 export class EventProcessor {
@@ -166,6 +168,13 @@ export class EventProcessor {
         success = true;
         break;
       } catch (err) {
+        if (err instanceof DocumentMissingError) {
+          // Out-of-order delivery across topics: park the event and replay it
+          // when the product document gets created.
+          await this.parkEvent(topic, evt);
+          this.eventsProcessedTotal.labels(topic, 'pending').inc();
+          return;
+        }
         lastError = err;
         this.logger.warn(
           `Attempt ${attempt}/${EVENT_RETRY_COUNT} failed for ${evt.event_id}: ${err instanceof Error ? err.name : 'UnknownError'}`,
@@ -181,9 +190,97 @@ export class EventProcessor {
     if (success) {
       this.eventsProcessedTotal.labels(topic, 'success').inc();
       await this.dlqPublisher.recordConsumerState(evt, 'PROCESSED');
+      if (evt.aggregate_id) {
+        await this.replayParkedEvents(evt.aggregate_id);
+      }
     } else {
       this.eventsProcessedTotal.labels(topic, 'failed').inc();
       await this.dlqPublisher.publish(topic, evt, lastError, ctx);
+    }
+  }
+
+  private pendingId(eventId: string): string {
+    return `pending:${eventId}`;
+  }
+
+  /** Stores an event whose product is not indexed yet in the state index. */
+  private async parkEvent(
+    topic: string,
+    evt: DomainEvent<unknown>,
+  ): Promise<void> {
+    const index = getConsumerStateIndex(this.configService.esIndexPrefix);
+    await this.esClient.index({
+      index,
+      id: this.pendingId(evt.event_id),
+      refresh: true,
+      document: {
+        event_id: evt.event_id,
+        aggregate_id: evt.aggregate_id || '',
+        source_version: evt.version ?? 0,
+        processed_at: new Date().toISOString(),
+        occurred_at: evt.occurred_at,
+        status: 'PENDING',
+        error_code: null,
+        topic,
+        event: evt,
+      },
+    });
+    this.logger.warn(
+      `Parked ${evt.event_type} ${evt.event_id}: product ${evt.aggregate_id} is not indexed yet`,
+    );
+  }
+
+  /** Re-applies parked events of a product, oldest first, once it exists. */
+  private async replayParkedEvents(productId: string): Promise<void> {
+    const index = getConsumerStateIndex(this.configService.esIndexPrefix);
+    let hits: Array<{
+      _id?: string;
+      _source?: { topic?: string; event?: DomainEvent<unknown> };
+    }> = [];
+    try {
+      const res = await this.esClient.search<{
+        topic?: string;
+        event?: DomainEvent<unknown>;
+      }>({
+        index,
+        size: PARKED_REPLAY_LIMIT,
+        query: {
+          bool: {
+            filter: [
+              { term: { status: 'PENDING' } },
+              { term: { aggregate_id: productId } },
+            ],
+          },
+        },
+        sort: [{ occurred_at: 'asc' }, { event_id: 'asc' }],
+      });
+      hits = res.hits.hits;
+    } catch (err: unknown) {
+      this.logger.warn(
+        `Parked event lookup failed for ${productId}: ${err instanceof Error ? err.name : 'UnknownError'}`,
+      );
+      return;
+    }
+
+    for (const hit of hits) {
+      const parked = hit._source;
+      if (!parked?.event || !parked.topic || !hit._id) continue;
+      try {
+        await this.dispatchToHandler(parked.topic, parked.event);
+      } catch (err: unknown) {
+        if (err instanceof DocumentMissingError) {
+          return; // still not indexed; keep everything parked
+        }
+        this.logger.warn(
+          `Replay of parked ${parked.event.event_id} failed: ${err instanceof Error ? err.name : 'UnknownError'}`,
+        );
+        continue;
+      }
+      await this.dlqPublisher.recordConsumerState(parked.event, 'PROCESSED');
+      await this.esClient.delete({ index, id: hit._id }).catch(() => undefined);
+      this.logger.log(
+        `Replayed parked ${parked.event.event_type} ${parked.event.event_id}`,
+      );
     }
   }
 
