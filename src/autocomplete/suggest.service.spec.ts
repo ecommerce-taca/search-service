@@ -144,10 +144,8 @@ describe('SuggestService (Unit)', () => {
       const result = await service.suggest(queryDto);
       expect(result).toEqual([]);
       expect(mockEsClient.search).toHaveBeenCalledWith(
-        expect.objectContaining({
-          index: aliasName,
-          requestTimeout: ES_REQUEST_TIMEOUT_MS,
-        }),
+        expect.objectContaining({ index: aliasName }),
+        { requestTimeout: ES_REQUEST_TIMEOUT_MS },
       );
     });
 
@@ -238,7 +236,10 @@ describe('SuggestService (Unit)', () => {
       const callArgs = mockEsClient.search.mock.calls[0][0];
 
       expect(callArgs.index).toBe(aliasName);
-      expect(callArgs.requestTimeout).toBe(ES_REQUEST_TIMEOUT_MS);
+      expect(callArgs).not.toHaveProperty('requestTimeout');
+      expect(mockEsClient.search.mock.calls[0][1]).toEqual({
+        requestTimeout: ES_REQUEST_TIMEOUT_MS,
+      });
       expect(callArgs.suggest).toBeDefined();
       expect(callArgs.query).toBeDefined();
       expect(callArgs.aggregations).toBeDefined();
@@ -556,6 +557,7 @@ describe('SuggestService (Unit)', () => {
             },
           },
         }),
+        { requestTimeout: ES_REQUEST_TIMEOUT_MS },
       );
 
       const brands = result.filter(

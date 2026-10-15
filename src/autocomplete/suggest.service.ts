@@ -30,10 +30,6 @@ export interface ProductDocSource {
   category_ids?: string | string[];
 }
 
-export interface SuggestSearchRequest extends estypes.SearchRequest {
-  requestTimeout?: number;
-}
-
 export function foldText(str: string): string {
   return str
     .normalize('NFD')
@@ -97,7 +93,12 @@ export class SuggestService {
 
     let res: estypes.SearchResponse<ProductDocSource>;
     try {
-      res = await this.client.search<ProductDocSource>(searchRequest);
+      // requestTimeout is a transport option: inside the request object the
+      // client would send it as an (invalid) body key and Elasticsearch
+      // would reject the search with a 400.
+      res = await this.client.search<ProductDocSource>(searchRequest, {
+        requestTimeout: ES_REQUEST_TIMEOUT_MS,
+      });
     } catch (err: unknown) {
       throw toSearchException(err);
     }
@@ -177,7 +178,7 @@ export class SuggestService {
     trimmedPrefix: string,
     limit: number,
     categoryId?: string,
-  ): SuggestSearchRequest {
+  ): estypes.SearchRequest {
     const alias = getProductsAlias(this.configService.esIndexPrefix);
 
     // Build the base filter once and reuse (MAJOR 2)
@@ -203,7 +204,6 @@ export class SuggestService {
 
     return {
       index: alias,
-      requestTimeout: ES_REQUEST_TIMEOUT_MS,
       _source: ['product_id', 'title', 'visibility_status', 'category_ids'],
       size: QUERY_FETCH_SIZE,
       query: {
