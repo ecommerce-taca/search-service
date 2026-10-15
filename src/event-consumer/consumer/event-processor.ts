@@ -26,6 +26,7 @@ import {
 } from '../handlers';
 import { DomainEvent, KafkaMessageInput } from '../interfaces';
 import { DlqPublisher } from './dlq-publisher';
+import { normalizeExtendedJson } from './extended-json';
 
 const SKUS_UPDATED_EVENT = 'product.skus_updated';
 
@@ -118,6 +119,8 @@ export class EventProcessor {
           );
         }
       }
+
+      evt.payload = normalizeExtendedJson(evt.payload);
 
       if ((await this.checkDeduplication(evt, topic)) !== 'DUPLICATE') {
         await this.executeWithRetry(topic, evt, ctx);

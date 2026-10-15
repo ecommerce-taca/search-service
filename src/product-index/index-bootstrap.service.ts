@@ -190,7 +190,19 @@ export class IndexBootstrapService implements OnApplicationBootstrap {
       const aliasMap = await this.client.indices.getAlias({ name: alias });
       const aliasedIndices = Object.keys(aliasMap).sort();
       if (aliasedIndices.length > 0) {
-        activeTargetIndex = aliasedIndices[0];
+        const target = aliasedIndices[0];
+        activeTargetIndex = target;
+        try {
+          await this.client.indices.putMapping({
+            index: target,
+            properties: PRODUCTS_INDEX_MAPPING_V1.properties,
+          });
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          this.logger.warn(
+            `Failed to sync mapping for index ${target}: ${message}`,
+          );
+        }
       }
     }
 

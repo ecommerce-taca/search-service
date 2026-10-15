@@ -1,6 +1,7 @@
 import { Client } from '@elastic/elasticsearch';
 import { AppConfigService } from '../config/config.service';
 import { IndexBootstrapService } from './index-bootstrap.service';
+import { PRODUCTS_INDEX_MAPPING_V1 } from './mappings';
 
 describe('IndexBootstrapService', () => {
   let service: IndexBootstrapService;
@@ -143,7 +144,7 @@ describe('IndexBootstrapService', () => {
     expect(result.consumerStateCreated).toBe(false);
   });
 
-  it('adds new fields to internal indices that already exist, never to the products index', async () => {
+  it('adds new fields to internal indices and the existing products index', async () => {
     mockIndices.existsAlias.mockResolvedValue(true);
     mockIndices.exists.mockResolvedValue(true);
     mockIndices.getAlias.mockResolvedValue({
@@ -159,17 +160,44 @@ describe('IndexBootstrapService', () => {
     );
     expect(syncedIndices).toEqual(
       expect.arrayContaining([
+        'test-products-v1-20261014100000',
         'test-search-consumer-state',
         'test-search-reindex-jobs',
         'test-search-categories',
       ]),
     );
-    expect(syncedIndices).not.toContain('test-products-v1-20261014100000');
+    expect(mockIndices.putMapping).toHaveBeenCalledWith({
+      index: 'test-products-v1-20261014100000',
+      properties: PRODUCTS_INDEX_MAPPING_V1.properties,
+    });
     const reindexJobsCall = mockIndices.putMapping.mock.calls.find(
       ([req]: [{ index: string }]) => req.index === 'test-search-reindex-jobs',
     ) as [{ properties: Record<string, unknown> }];
     expect(reindexJobsCall[0].properties).toHaveProperty('total_estimate', {
       type: 'long',
     });
+  });
+
+  it('logs a warning and continues when putMapping fails on existing products index', async () => {
+    mockIndices.existsAlias.mockResolvedValue(true);
+    mockIndices.exists.mockResolvedValue(true);
+    mockIndices.getAlias.mockResolvedValue({
+      'test-products-v1-20261014100000': {
+        aliases: { 'test-products-read': {} },
+      },
+    });
+    mockIndices.putMapping.mockImplementation(
+      async (params: { index: string }) => {
+        if (params.index === 'test-products-v1-20261014100000') {
+          throw new Error('Mapping sync conflict');
+        }
+        return { acknowledged: true };
+      },
+    );
+
+    const result = await service.bootstrap();
+
+    expect(result.activeTargetIndex).toBe('test-products-v1-20261014100000');
+    expect(result.consumerStateCreated).toBe(false);
   });
 });
