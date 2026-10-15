@@ -152,6 +152,13 @@ export class KafkaEventConsumer
           }
 
           resolveOffset(message.offset);
+          await this.consumer?.commitOffsets([
+            {
+              topic: batch.topic,
+              partition: batch.partition,
+              offset: (BigInt(message.offset) + 1n).toString(),
+            },
+          ]);
           await heartbeat();
         }
 

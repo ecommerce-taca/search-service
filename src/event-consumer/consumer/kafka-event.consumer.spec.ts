@@ -111,6 +111,7 @@ describe('KafkaEventConsumer & EventProcessor', () => {
       subscribe: jest.fn().mockResolvedValue(undefined),
       run: jest.fn().mockResolvedValue(undefined),
       stop: jest.fn().mockResolvedValue(undefined),
+      commitOffsets: jest.fn().mockResolvedValue(undefined),
     };
 
     mockProducer = {
@@ -206,6 +207,81 @@ describe('KafkaEventConsumer & EventProcessor', () => {
       );
     });
 
+    it('should resolve and commit offset after each successfully processed message', async () => {
+      await consumerService.onApplicationBootstrap();
+
+      const runCall = (mockConsumer.run as jest.Mock).mock.calls[0][0];
+      const eachBatch = runCall.eachBatch;
+
+      const resolveOffset = jest.fn();
+      const heartbeat = jest.fn().mockResolvedValue(undefined);
+      const commitOffsetsIfNecessary = jest.fn().mockResolvedValue(undefined);
+
+      const batch = {
+        topic: 'test-product.events.v1',
+        partition: 2,
+        highWatermark: '10',
+        messages: [
+          {
+            offset: '100',
+            key: Buffer.from('prod-1'),
+            value: Buffer.from(
+              JSON.stringify({
+                event_id: 'evt-1',
+                event_type: 'product.created',
+                aggregate_id: 'prod-1',
+                version: 1,
+                payload: { product_id: 'prod-1' },
+              }),
+            ),
+          },
+          {
+            offset: '101',
+            key: Buffer.from('prod-2'),
+            value: Buffer.from(
+              JSON.stringify({
+                event_id: 'evt-2',
+                event_type: 'product.created',
+                aggregate_id: 'prod-2',
+                version: 1,
+                payload: { product_id: 'prod-2' },
+              }),
+            ),
+          },
+        ],
+      };
+
+      await eachBatch({
+        batch,
+        resolveOffset,
+        heartbeat,
+        commitOffsetsIfNecessary,
+        isRunning: () => true,
+        isStale: () => false,
+      });
+
+      expect(resolveOffset).toHaveBeenCalledTimes(2);
+      expect(resolveOffset).toHaveBeenNthCalledWith(1, '100');
+      expect(resolveOffset).toHaveBeenNthCalledWith(2, '101');
+
+      expect(mockConsumer.commitOffsets).toHaveBeenCalledTimes(2);
+      expect(mockConsumer.commitOffsets).toHaveBeenNthCalledWith(1, [
+        {
+          topic: 'test-product.events.v1',
+          partition: 2,
+          offset: '101',
+        },
+      ]);
+      expect(mockConsumer.commitOffsets).toHaveBeenNthCalledWith(2, [
+        {
+          topic: 'test-product.events.v1',
+          partition: 2,
+          offset: '102',
+        },
+      ]);
+      expect(commitOffsetsIfNecessary).toHaveBeenCalledTimes(1);
+    });
+
     it('should not resolve offset and should propagate error when DLQ send rejects', async () => {
       const dlqError = new Error('Kafka broker unavailable for DLQ');
       mockProducer.send = jest.fn().mockRejectedValue(dlqError);
@@ -263,6 +339,83 @@ describe('KafkaEventConsumer & EventProcessor', () => {
       ).rejects.toThrow('Kafka broker unavailable for DLQ');
 
       expect(resolveOffset).not.toHaveBeenCalled();
+      expect(mockConsumer.commitOffsets).not.toHaveBeenCalled();
+      expect(commitOffsetsIfNecessary).not.toHaveBeenCalled();
+    });
+
+    it('should propagate error and not commit offset for failed message in batch', async () => {
+      mockProductHandler.handle = jest
+        .fn()
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValue(new Error('Handler failure on msg 2'));
+      mockProducer.send = jest
+        .fn()
+        .mockRejectedValue(new Error('DLQ publish failed'));
+
+      await consumerService.onApplicationBootstrap();
+
+      const runCall = (mockConsumer.run as jest.Mock).mock.calls[0][0];
+      const eachBatch = runCall.eachBatch;
+
+      const resolveOffset = jest.fn();
+      const heartbeat = jest.fn().mockResolvedValue(undefined);
+      const commitOffsetsIfNecessary = jest.fn().mockResolvedValue(undefined);
+
+      const batch = {
+        topic: 'test-product.events.v1',
+        partition: 0,
+        highWatermark: '10',
+        messages: [
+          {
+            offset: '200',
+            key: Buffer.from('prod-1'),
+            value: Buffer.from(
+              JSON.stringify({
+                event_id: 'evt-succ',
+                event_type: 'product.created',
+                aggregate_id: 'prod-1',
+                version: 1,
+                payload: { product_id: 'prod-1' },
+              }),
+            ),
+          },
+          {
+            offset: '201',
+            key: Buffer.from('prod-2'),
+            value: Buffer.from(
+              JSON.stringify({
+                event_id: 'evt-fail',
+                event_type: 'product.created',
+                aggregate_id: 'prod-2',
+                version: 1,
+                payload: { product_id: 'prod-2' },
+              }),
+            ),
+          },
+        ],
+      };
+
+      await expect(
+        eachBatch({
+          batch,
+          resolveOffset,
+          heartbeat,
+          commitOffsetsIfNecessary,
+          isRunning: () => true,
+          isStale: () => false,
+        }),
+      ).rejects.toThrow('DLQ publish failed');
+
+      expect(resolveOffset).toHaveBeenCalledTimes(1);
+      expect(resolveOffset).toHaveBeenCalledWith('200');
+      expect(mockConsumer.commitOffsets).toHaveBeenCalledTimes(1);
+      expect(mockConsumer.commitOffsets).toHaveBeenCalledWith([
+        {
+          topic: 'test-product.events.v1',
+          partition: 0,
+          offset: '201',
+        },
+      ]);
       expect(commitOffsetsIfNecessary).not.toHaveBeenCalled();
     });
   });
