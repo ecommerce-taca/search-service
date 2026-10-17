@@ -11,7 +11,7 @@ import { SearchErrorCode } from '../../common/errors/error-codes';
 import { SearchException } from '../../common/errors/search.exception';
 import { AppConfigService } from '../../config/config.service';
 import { ELASTICSEARCH_CLIENT } from '../../product-index/elasticsearch.module';
-import { DomainEvent } from '../interfaces';
+import { DlqEnvelope, DlqMetadata, DomainEvent } from '../interfaces';
 import { KAFKA_CLIENT } from '../kafka.module';
 
 @Injectable()
@@ -51,6 +51,9 @@ export class DlqPublisher {
           processed_at: new Date().toISOString(),
           status,
           error_code: errorCode,
+          ...(evt.replay_of_event_id
+            ? { replay_of_event_id: evt.replay_of_event_id }
+            : {}),
         },
       });
     } catch (err: unknown) {
@@ -73,8 +76,8 @@ export class DlqPublisher {
     evt: DomainEvent<unknown>,
     error: unknown,
     ctx: RequestContextData,
+    meta: DlqMetadata = {},
   ): Promise<void> {
-    void topic;
     const errorCode =
       error instanceof SearchException
         ? error.code
@@ -95,12 +98,17 @@ export class DlqPublisher {
       this.configService.kafkaTopicPrefix,
     );
 
-    const redactedEnvelope = {
+    const redactedEnvelope: DlqEnvelope = {
       event_id: evt.event_id,
       event_type: evt.event_type,
       aggregate_id: evt.aggregate_id,
       version: evt.version,
       error_code: String(errorCode),
+      source_topic: topic,
+      source_partition: meta.partition ?? 0,
+      source_offset: meta.offset ?? '',
+      attempts: meta.attempts ?? 1,
+      failed_at: meta.failed_at ?? new Date().toISOString(),
     };
 
     try {

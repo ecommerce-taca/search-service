@@ -36,6 +36,7 @@ const PARKED_REPLAY_LIMIT = 100;
 export class EventProcessor {
   private readonly logger = new Logger(EventProcessor.name);
   private readonly eventsProcessedTotal: Counter<string>;
+  private readonly eventsReplayedTotal: Counter<string>;
 
   constructor(
     private readonly configService: AppConfigService,
@@ -55,6 +56,16 @@ export class EventProcessor {
         name: 'events_processed_total',
         help: 'Total processed domain events by topic and outcome',
         labelNames: ['topic', 'outcome'],
+        registers: [reg],
+      });
+    this.eventsReplayedTotal =
+      (reg.getSingleMetric(
+        'search_events_replayed_total',
+      ) as Counter<string>) ||
+      new Counter({
+        name: 'search_events_replayed_total',
+        help: 'Total replayed domain events processed by topic',
+        labelNames: ['topic'],
         registers: [reg],
       });
   }
@@ -125,7 +136,10 @@ export class EventProcessor {
       evt.payload = normalizeExtendedJson(evt.payload);
 
       if ((await this.checkDeduplication(evt, topic)) !== 'DUPLICATE') {
-        await this.executeWithRetry(topic, evt, ctx);
+        await this.executeWithRetry(topic, evt, ctx, {
+          partition,
+          offset: message.offset,
+        });
       }
       return (evt.occurred_at as string) || null;
     });
@@ -159,10 +173,13 @@ export class EventProcessor {
     topic: string,
     evt: DomainEvent<unknown>,
     ctx: RequestContextData,
+    meta?: { partition?: number; offset?: string },
   ): Promise<void> {
     let lastError: unknown = null;
     let success = false;
+    let attempts = 0;
     for (let attempt = 1; attempt <= EVENT_RETRY_COUNT; attempt++) {
+      attempts = attempt;
       try {
         await this.dispatchToHandler(topic, evt);
         success = true;
@@ -189,13 +206,28 @@ export class EventProcessor {
 
     if (success) {
       this.eventsProcessedTotal.labels(topic, 'success').inc();
+      if (evt.replay_of_event_id) {
+        this.eventsReplayedTotal.labels(topic).inc();
+        const traceId =
+          ctx?.traceId || RequestContext.getTraceId() || 'unknown';
+        this.logger.log({
+          event: 'event.replayed',
+          event_id: evt.event_id,
+          replay_of_event_id: evt.replay_of_event_id,
+          trace_id: traceId,
+        });
+      }
       await this.dlqPublisher.recordConsumerState(evt, 'PROCESSED');
       if (evt.aggregate_id) {
-        await this.replayParkedEvents(evt.aggregate_id);
+        await this.replayParkedEvents(evt.aggregate_id, ctx);
       }
     } else {
       this.eventsProcessedTotal.labels(topic, 'failed').inc();
-      await this.dlqPublisher.publish(topic, evt, lastError, ctx);
+      await this.dlqPublisher.publish(topic, evt, lastError, ctx, {
+        partition: meta?.partition ?? 0,
+        offset: meta?.offset ?? '',
+        attempts,
+      });
     }
   }
 
@@ -223,6 +255,9 @@ export class EventProcessor {
         error_code: null,
         topic,
         event: evt,
+        ...(evt.replay_of_event_id
+          ? { replay_of_event_id: evt.replay_of_event_id }
+          : {}),
       },
     });
     this.logger.warn(
@@ -231,7 +266,10 @@ export class EventProcessor {
   }
 
   /** Re-applies parked events of a product, oldest first, once it exists. */
-  private async replayParkedEvents(productId: string): Promise<void> {
+  private async replayParkedEvents(
+    productId: string,
+    ctx?: RequestContextData,
+  ): Promise<void> {
     const index = getConsumerStateIndex(this.configService.esIndexPrefix);
     let hits: Array<{
       _id?: string;
@@ -275,6 +313,17 @@ export class EventProcessor {
           `Replay of parked ${parked.event.event_id} failed: ${err instanceof Error ? err.name : 'UnknownError'}`,
         );
         continue;
+      }
+      if (parked.event.replay_of_event_id) {
+        this.eventsReplayedTotal.labels(parked.topic).inc();
+        const traceId =
+          ctx?.traceId || RequestContext.getTraceId() || 'unknown';
+        this.logger.log({
+          event: 'event.replayed',
+          event_id: parked.event.event_id,
+          replay_of_event_id: parked.event.replay_of_event_id,
+          trace_id: traceId,
+        });
       }
       await this.dlqPublisher.recordConsumerState(parked.event, 'PROCESSED');
       await this.esClient.delete({ index, id: hit._id }).catch(() => undefined);

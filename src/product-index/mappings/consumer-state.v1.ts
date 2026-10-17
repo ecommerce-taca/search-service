@@ -13,5 +13,6 @@ export const CONSUMER_STATE_MAPPING_V1: MappingTypeMapping = {
     topic: { type: 'keyword' },
     occurred_at: { type: 'date' },
     event: { type: 'object', enabled: false },
+    replay_of_event_id: { type: 'keyword' },
   },
 };

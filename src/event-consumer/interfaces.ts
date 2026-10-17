@@ -9,6 +9,7 @@ export interface DomainEvent<T = unknown> {
   aggregate_id: string;
   version: number;
   payload: T;
+  replay_of_event_id?: string;
 }
 
 export interface ConsumerStatus {
@@ -29,4 +30,24 @@ export interface KafkaMessageInput {
   headers?: Record<string, Buffer | string | undefined | (Buffer | string)[]>;
   value: Buffer | string | null;
   offset: string;
+}
+
+export interface DlqMetadata {
+  partition?: number;
+  offset?: string;
+  attempts?: number;
+  failed_at?: string;
+}
+
+export interface DlqEnvelope {
+  event_id: string;
+  event_type: string;
+  aggregate_id: string;
+  version: number;
+  error_code: string;
+  source_topic: string;
+  source_partition: number;
+  source_offset: string;
+  attempts: number;
+  failed_at: string;
 }
