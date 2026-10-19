@@ -1,0 +1,51 @@
+# Manifest môi trường K8S dev. Job deploy-dev trong ci.yml thay __IMAGE__ bằng image develop-<sha> rồi kubectl apply.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: search-service
+  labels: { app: search-service, part-of: taca }
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels: { app: search-service }
+  template:
+    metadata:
+      labels: { app: search-service, part-of: taca }
+    spec:
+      containers:
+        - name: app
+          image: __IMAGE__
+          ports:
+            - { name: http, containerPort: 3000 }
+          env:
+            - { name: PORT, value: "3000" }
+            - { name: SERVICE_NAME, value: search-service }
+            - { name: APP_ENV, value: development }
+            - { name: ES_NODE, value: "http://elasticsearch.dev.svc:9200" }
+            - name: KAFKA_BROKERS
+              valueFrom: { configMapKeyRef: { name: taca-common, key: KAFKA_BROKERS } }
+            - { name: KAFKA_CLIENT_ID, value: search-service }
+            - { name: KAFKA_GROUP_ID, value: search-service-group }
+            - { name: KAFKA_CONSUMER_ENABLED, value: "true" }
+          readinessProbe:
+            httpGet: { path: /health/live, port: 3000 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health/live, port: 3000 }
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 384Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: search-service
+  labels: { app: search-service, part-of: taca }
+spec:
+  selector: { app: search-service }
+  ports:
+    - { name: http, port: 3000, targetPort: 3000 }

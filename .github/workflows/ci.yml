@@ -64,3 +64,36 @@ jobs:
           tags: ${{ steps.tags.outputs.list }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy-dev:
+    name: Deploy to K8S dev
+    needs: docker
+    # Chỉ deploy khi push lên develop; PR (kể cả từ fork) không bao giờ chạy trên runner trong cụm.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    # Runner ARC chạy trong cụm K8S (ns arc-runners, SA taca-deployer chỉ có quyền ở ns dev)
+    runs-on: arc-taca-cd
+    environment: dev
+    concurrency:
+      group: deploy-dev-${{ github.repository }}
+      cancel-in-progress: false
+    env:
+      DEPLOYMENT: search-service
+      IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/search-service:develop-${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-kubectl@v4
+
+      # Manifest nằm trong repo; thay __IMAGE__ bằng image vừa push (tag theo SHA để rollback được)
+      - name: Apply manifest
+        run: sed "s|__IMAGE__|${IMAGE}|g" deploy/k8s/dev/app.yaml | kubectl apply -n dev -f -
+
+      # Rollout không xong trong thời hạn → quay về bản trước và fail job
+      - name: Wait for rollout
+        run: |
+          if ! kubectl -n dev rollout status "deployment/${DEPLOYMENT}" --timeout=10m; then
+            kubectl -n dev describe "deployment/${DEPLOYMENT}" | tail -20
+            kubectl -n dev logs "deployment/${DEPLOYMENT}" --tail=50 || true
+            kubectl -n dev rollout undo "deployment/${DEPLOYMENT}" || true
+            exit 1
+          fi
