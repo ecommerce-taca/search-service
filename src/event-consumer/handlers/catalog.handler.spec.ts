@@ -27,6 +27,7 @@ describe('CatalogHandler product.category_changed', () => {
       bulkUpsert: jest.fn().mockResolvedValue(undefined),
       bulkPartialUpdate: jest.fn().mockResolvedValue(undefined),
       getCurrentVersions: jest.fn().mockResolvedValue(new Map()),
+      updateShopSnapshot: jest.fn().mockResolvedValue(0),
     };
     projection = {
       getMany: jest.fn().mockResolvedValue(new Map()),
@@ -66,5 +67,45 @@ describe('CatalogHandler product.category_changed', () => {
     );
 
     expect(patchedCategoryIds()).toEqual(['cat-unknown']);
+  });
+});
+
+describe('CatalogHandler product.shop_snapshot_updated', () => {
+  it('updates every document of the shop when the event is keyed by shop', async () => {
+    const writer = {
+      bulkUpsert: jest.fn(),
+      bulkPartialUpdate: jest.fn(),
+      getCurrentVersions: jest.fn(),
+      updateShopSnapshot: jest.fn().mockResolvedValue(12),
+    } as jest.Mocked<IIndexWriter>;
+    const handler = new CatalogHandler(
+      { esIndexPrefix: '' } as AppConfigService,
+      writer,
+      { getMany: jest.fn(), resolvePathIds: jest.fn() },
+    );
+
+    // Payload đúng như Catalog shop-projection.service.ts phát ra.
+    await handler.handle({
+      event_id: 'evt-shop-1',
+      schema_version: 1,
+      event_type: 'product.shop_snapshot_updated',
+      occurred_at: '2026-10-31T10:00:00Z',
+      aggregate_type: 'SHOP_PROJECTION',
+      aggregate_id: 'shop-1',
+      version: 5,
+      payload: {
+        shop_id: 'shop-1',
+        name: 'Anker Official',
+        slug: 'anker-official',
+        old_name: 'Anker',
+        old_slug: 'anker',
+      },
+    });
+
+    expect(writer.updateShopSnapshot).toHaveBeenCalledWith('products-read', {
+      shop_id: 'shop-1',
+      name: 'Anker Official',
+    });
+    expect(writer.bulkPartialUpdate).not.toHaveBeenCalled();
   });
 });

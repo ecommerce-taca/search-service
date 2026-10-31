@@ -44,7 +44,11 @@ describe('EventProcessor', () => {
     search: jest.Mock;
     delete: jest.Mock;
   };
-  let dlq: { publish: jest.Mock; recordConsumerState: jest.Mock };
+  let dlq: {
+    publish: jest.Mock;
+    publishInvalidMessage: jest.Mock;
+    recordConsumerState: jest.Mock;
+  };
   let productHandler: { handle: jest.Mock };
   let catalogHandler: { handle: jest.Mock };
   let registry: Registry;
@@ -59,6 +63,7 @@ describe('EventProcessor', () => {
     };
     dlq = {
       publish: jest.fn(),
+      publishInvalidMessage: jest.fn().mockResolvedValue(undefined),
       recordConsumerState: jest.fn().mockResolvedValue(undefined),
     };
     productHandler = { handle: jest.fn().mockResolvedValue(undefined) };
@@ -75,6 +80,41 @@ describe('EventProcessor', () => {
       catalogHandler as never,
       { handle: jest.fn() } as never,
     );
+  });
+
+  it('reads event_id from the Debezium `id` header and aggregate_id from the key', async () => {
+    // Hình dạng value do outbox-connector.json của Catalog sinh ra: không có event_id/aggregate_id.
+    const debeziumValue = {
+      payload: JSON.stringify({ product_id: 'prod-9', title: 'x' }),
+      version: 3,
+      event_type: 'product.created',
+      schema_version: 1,
+      occurred_at: 1792031012815,
+      aggregate_type: 'PRODUCT',
+    };
+    await processor.processMessage(PRODUCT_TOPIC, {
+      offset: '7',
+      key: Buffer.from(JSON.stringify('prod-9')),
+      value: Buffer.from(JSON.stringify(debeziumValue)),
+      headers: { id: Buffer.from(JSON.stringify('evt-debezium-1')) },
+    });
+
+    expect(dlq.publishInvalidMessage).not.toHaveBeenCalled();
+    expect(productHandler.handle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_id: 'evt-debezium-1',
+        aggregate_id: 'prod-9',
+        payload: { product_id: 'prod-9', title: 'x' },
+      }),
+    );
+  });
+
+  it('still sends to the DLQ when neither body nor header has an event_id', async () => {
+    const noId: Record<string, unknown> = { ...created };
+    delete noId.event_id;
+    await processor.processMessage(PRODUCT_TOPIC, message(noId));
+    expect(dlq.publishInvalidMessage).toHaveBeenCalled();
+    expect(productHandler.handle).not.toHaveBeenCalled();
   });
 
   it('parks an event whose product is not indexed instead of sending it to the DLQ', async () => {

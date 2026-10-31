@@ -276,4 +276,38 @@ describe('EsIndexWriter', () => {
       expect(mockClient.mget).not.toHaveBeenCalled();
     });
   });
+
+  describe('updateShopSnapshot', () => {
+    it('updates every document of the shop by query and returns the count', async () => {
+      const updateByQuery = jest
+        .fn()
+        .mockResolvedValue({ updated: 3, failures: [] });
+      const w = new EsIndexWriter({ updateByQuery } as unknown as Client);
+
+      const updated = await w.updateShopSnapshot('products-read', {
+        shop_id: 'shop-1',
+        name: 'Anker Official',
+      });
+
+      expect(updated).toBe(3);
+      const req = updateByQuery.mock.calls[0][0];
+      expect(req.index).toBe('products-read');
+      expect(req.conflicts).toBe('proceed');
+      expect(JSON.stringify(req.query)).toContain('shop-1');
+      expect(req.script.params).toMatchObject({
+        shop_id: 'shop-1',
+        name: 'Anker Official',
+      });
+    });
+
+    it('throws when update-by-query reports failures', async () => {
+      const updateByQuery = jest
+        .fn()
+        .mockResolvedValue({ updated: 1, failures: [{ id: 'x' }] });
+      const w = new EsIndexWriter({ updateByQuery } as unknown as Client);
+      await expect(
+        w.updateShopSnapshot('products-read', { shop_id: 's', name: 'n' }),
+      ).rejects.toThrow('failures');
+    });
+  });
 });

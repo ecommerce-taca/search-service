@@ -28,8 +28,21 @@ import {
 import { DomainEvent, KafkaMessageInput } from '../interfaces';
 import { DlqPublisher } from './dlq-publisher';
 import { normalizeExtendedJson } from './extended-json';
+import { decodeDebeziumScalar } from './debezium';
 
 const SKUS_UPDATED_EVENT = 'product.skus_updated';
+
+function readHeader(
+  headers: KafkaMessageInput['headers'],
+  name: string,
+): string | undefined {
+  if (!headers) return undefined;
+  for (const [k, v] of Object.entries(headers)) {
+    if (k.toLowerCase() !== name || v == null) continue;
+    return decodeDebeziumScalar(Array.isArray(v) ? v[0] : v);
+  }
+  return undefined;
+}
 const PARKED_REPLAY_LIMIT = 100;
 
 @Injectable()
@@ -109,6 +122,17 @@ export class EventProcessor {
         return sendInvalid(
           `Failed parsing JSON on ${topic}: ${parseErr instanceof Error ? parseErr.name : 'UnknownError'}`,
         );
+      }
+
+      // Catalog publish qua Debezium Outbox Event Router: `event_id` nằm ở header `id`
+      // và `aggregate_id` là Kafka key, không có trong value (contract đã triển khai).
+      if (!evt.event_id) {
+        const headerId = readHeader(message.headers, 'id');
+        if (headerId) evt.event_id = headerId;
+      }
+      if (!evt.aggregate_id) {
+        const key = decodeDebeziumScalar(message.key);
+        if (key) evt.aggregate_id = key;
       }
 
       if (!evt.event_id) {

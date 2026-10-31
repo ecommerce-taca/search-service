@@ -40,6 +40,16 @@ export class CatalogHandler {
 
   async handle(evt: DomainEvent<unknown>): Promise<void> {
     const payload = (evt.payload || {}) as CatalogEventPayload;
+
+    // Catalog phát event này một lần cho cả shop: aggregate_type=SHOP_PROJECTION,
+    // aggregate_id=shop_id, payload không có product_id (contract đã triển khai).
+    if (
+      evt.event_type === 'product.shop_snapshot_updated' &&
+      !payload.product_id
+    ) {
+      return this.handleShopSnapshotByShop(evt, payload);
+    }
+
     const productId = evt.aggregate_id || payload.product_id;
 
     if (!productId) {
@@ -148,5 +158,27 @@ export class CatalogHandler {
         );
         break;
     }
+  }
+
+  private async handleShopSnapshotByShop(
+    evt: DomainEvent<unknown>,
+    payload: CatalogEventPayload,
+  ): Promise<void> {
+    const shopId = payload.shop_id || payload.shop?.shop_id || evt.aggregate_id;
+    const name = payload.name || payload.shop_name || payload.shop?.name;
+    if (!shopId || !name) {
+      this.logger.debug(
+        `product.shop_snapshot_updated ${evt.event_id} has no shop_id/name`,
+      );
+      return;
+    }
+    const productsAlias = getProductsAlias(this.configService.esIndexPrefix);
+    const updated = await this.indexWriter.updateShopSnapshot(productsAlias, {
+      shop_id: shopId,
+      name,
+    });
+    this.logger.debug(
+      `product.shop_snapshot_updated shop=${shopId} updated ${updated} documents`,
+    );
   }
 }

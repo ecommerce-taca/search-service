@@ -87,6 +87,47 @@ export class EsIndexWriter implements IIndexWriter {
    * Bulk partial updates product documents.
    * Treats 409 conflicts as SKIP.
    */
+  /**
+   * Catalog phát `product.shop_snapshot_updated` một lần cho cả shop (aggregate_id = shop_id),
+   * nên cập nhật mọi document của shop bằng update-by-query thay vì theo product ID.
+   */
+  async updateShopSnapshot(
+    index: string,
+    shop: { shop_id: string; name: string },
+  ): Promise<number> {
+    const res = await this.client.updateByQuery({
+      index,
+      conflicts: 'proceed',
+      refresh: false,
+      query: {
+        bool: {
+          should: [
+            { term: { 'shop.shop_id': shop.shop_id } },
+            { term: { shop_id: shop.shop_id } },
+          ],
+          minimum_should_match: 1,
+        },
+      },
+      script: {
+        lang: 'painless',
+        source:
+          'if (ctx._source.shop == null) { ctx._source.shop = [:]; } ctx._source.shop.shop_id = params.shop_id; ctx._source.shop.name = params.name; ctx._source.indexed_at = params.indexed_at;',
+        params: {
+          shop_id: shop.shop_id,
+          name: shop.name,
+          indexed_at: new Date().toISOString(),
+        },
+      },
+    });
+    const failures = res.failures ?? [];
+    if (failures.length > 0) {
+      throw new Error(
+        `Update-by-query shop ${shop.shop_id} on ${index} had ${failures.length} failures`,
+      );
+    }
+    return res.updated ?? 0;
+  }
+
   async bulkPartialUpdate(
     index: string,
     updates: Array<{ id: string; doc: Partial<ProductSearchDocument> }>,

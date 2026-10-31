@@ -13,6 +13,7 @@ describe('RatingEventHandler', () => {
       bulkUpsert: jest.fn().mockResolvedValue(undefined),
       bulkPartialUpdate: jest.fn().mockResolvedValue(undefined),
       getCurrentVersions: jest.fn().mockResolvedValue(new Map()),
+      updateShopSnapshot: jest.fn().mockResolvedValue(0),
     };
 
     mockClient = {

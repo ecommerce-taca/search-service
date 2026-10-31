@@ -12,6 +12,7 @@ import {
 import { ReindexErrorCode } from './enums';
 import { ReindexJobDocument, ReindexJobRepository } from './job.repository';
 import { ReindexSource } from './reindex-source.interface';
+import { decodeDebeziumScalar } from '../event-consumer/consumer/debezium';
 
 @Injectable()
 export class KafkaReplaySource implements ReindexSource {
@@ -129,6 +130,19 @@ export class KafkaReplaySource implements ReindexSource {
             if (message.value) {
               try {
                 const event = JSON.parse(message.value.toString());
+                // Cùng contract Debezium như consumer chính: id ở header, key = aggregate_id.
+                if (!event.event_id) {
+                  const id = message.headers?.id;
+                  event.event_id = decodeDebeziumScalar(
+                    Array.isArray(id) ? id[0] : id,
+                  );
+                }
+                if (!event.aggregate_id) {
+                  event.aggregate_id = decodeDebeziumScalar(message.key);
+                }
+                if (typeof event.payload === 'string') {
+                  event.payload = JSON.parse(event.payload);
+                }
                 const change = this.documentBuilder!.build(event, null);
                 if (change.kind === 'UPSERT') {
                   await this.indexWriter!.bulkUpsert(targetIndex, [change.doc]);
