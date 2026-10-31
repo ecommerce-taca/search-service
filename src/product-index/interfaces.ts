@@ -87,6 +87,11 @@ export interface IIndexWriter {
     index: string,
     ids: string[],
   ): Promise<Map<string, number>>;
+  /** Cập nhật `shop` trên mọi document có `shop.shop_id`; trả về số document đã đổi. */
+  updateShopSnapshot(
+    index: string,
+    shop: { shop_id: string; name: string },
+  ): Promise<number>;
 }
 
 export const PRODUCT_DOCUMENT_BUILDER = 'IProductDocumentBuilder';

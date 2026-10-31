@@ -28,6 +28,8 @@ export const CONSUMER_STATUS_PROVIDER = 'IConsumerStatusProvider';
 
 export interface KafkaMessageInput {
   headers?: Record<string, Buffer | string | undefined | (Buffer | string)[]>;
+  /** Kafka key; Debezium Outbox Event Router của Catalog đặt `aggregate_id` ở đây. */
+  key?: Buffer | string | null;
   value: Buffer | string | null;
   offset: string;
 }
