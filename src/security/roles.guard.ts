@@ -5,6 +5,8 @@ import { SearchErrorCode } from '../common/errors/error-codes';
 import { SearchException } from '../common/errors/search.exception';
 import { ROLES_KEY } from './security.decorators';
 
+const SUPER_ADMIN_ROLE = 'SUPER_ADMIN';
+
 @Injectable()
 export class RolesGuard implements CanActivate {
   constructor(private readonly reflector: Reflector) {}
@@ -21,8 +23,16 @@ export class RolesGuard implements CanActivate {
 
     const actor = RequestContext.getActor();
     const userRoles = actor?.roles || [];
+    const userPermissions = actor?.permissions || [];
 
-    const hasAllRoles = requiredRoles.every((role) => userRoles.includes(role));
+    // auth-user cấp SEARCH_ADMIN dưới dạng permission (X-User-Permissions); vẫn chấp nhận
+    // dạng role cho tương thích. SUPER_ADMIN (role admin của auth-user) qua mọi yêu cầu.
+    if (userRoles.includes(SUPER_ADMIN_ROLE)) {
+      return true;
+    }
+    const hasAllRoles = requiredRoles.every(
+      (role) => userRoles.includes(role) || userPermissions.includes(role),
+    );
     if (!hasAllRoles) {
       throw new SearchException(SearchErrorCode.SEARCH_ADMIN_FORBIDDEN);
     }
