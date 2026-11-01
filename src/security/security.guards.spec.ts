@@ -77,6 +77,35 @@ describe('Security Guards', () => {
         },
       );
     });
+
+    it.each([
+      [
+        'SEARCH_ADMIN permission from auth-user',
+        { roles: ['SELLER'], permissions: ['SEARCH_ADMIN'] },
+      ],
+      [
+        'SUPER_ADMIN role from auth-user',
+        { roles: ['SUPER_ADMIN'], permissions: [] },
+      ],
+    ])('should allow access for %s', (_label, actor) => {
+      jest
+        .spyOn(reflector, 'getAllAndOverride')
+        .mockReturnValue(['SEARCH_ADMIN']);
+      const guard = new RolesGuard(reflector);
+
+      RequestContext.run(
+        {
+          requestId: 'test-req',
+          traceId: 'tid',
+          spanId: 'sid',
+          traceparent: '00-tid-sid-01',
+          actor: { ...actor, mfaStepUp: false },
+        },
+        () => {
+          expect(guard.canActivate(context)).toBe(true);
+        },
+      );
+    });
   });
 
   describe('StepUpGuard', () => {
